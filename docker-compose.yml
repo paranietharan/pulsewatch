@@ -1,4 +1,7 @@
 services:
+  # ----------------------------------------------------------------------------
+  # PostgreSQL Database (Exposed on host port 5432 for local migrations & CLI)
+  # ----------------------------------------------------------------------------
   postgres:
     image: postgres:16-alpine
     container_name: pulsewatch-postgres
@@ -21,6 +24,9 @@ services:
     networks:
       - pulsewatch-network
 
+  # ----------------------------------------------------------------------------
+  # RabbitMQ Message Broker
+  # ----------------------------------------------------------------------------
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
     container_name: pulsewatch-rabbitmq
@@ -42,13 +48,140 @@ services:
     networks:
       - pulsewatch-network
 
+  # ----------------------------------------------------------------------------
+  # Mailpit (Local SMTP Server & Web Inbox)
+  # ----------------------------------------------------------------------------
   mailpit:
-    image: axllent/mailpit:latest
+    image: axllent/mailpit:v1.31
     container_name: pulsewatch-mailpit
     restart: unless-stopped
     ports:
       - "${SMTP_PORT:-1025}:1025"
       - "${MAILPIT_PORT:-8025}:8025"
+    networks:
+      - pulsewatch-network
+
+  # ----------------------------------------------------------------------------
+  # Database Migration Runner (Applies migrations on container startup)
+  # ----------------------------------------------------------------------------
+  migrator:
+    build:
+      context: ./pulse-watch-db
+      dockerfile: Dockerfile
+    container_name: pulsewatch-migrator
+    restart: "no"
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-pulsewatch}:${POSTGRES_PASSWORD:-pulsewatch_secret}@postgres:5432/${POSTGRES_DB:-pulsewatch}?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - pulsewatch-network
+
+  # ----------------------------------------------------------------------------
+  # REST API Service
+  # ----------------------------------------------------------------------------
+  api:
+    build:
+      context: ./pulsewatch-api
+      dockerfile: Dockerfile
+    container_name: pulsewatch-api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-8080}:8080"
+    environment:
+      API_HOST: 0.0.0.0
+      API_PORT: 8080
+      DATABASE_URL: postgres://${POSTGRES_USER:-pulsewatch}:${POSTGRES_PASSWORD:-pulsewatch_secret}@postgres:5432/${POSTGRES_DB:-pulsewatch}?sslmode=disable
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-pulsewatch}:${RABBITMQ_DEFAULT_PASS:-pulsewatch_secret}@rabbitmq:5672/
+      JWT_SECRET: ${JWT_SECRET:-9h66d7LVUnjNeiMmtIATk3vaiwYIH5iHurEaa7SYYFe}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      CLIENT_IP_STRATEGY: ${CLIENT_IP_STRATEGY:-remote_addr}
+      CLIENT_IP_HEADER: ${CLIENT_IP_HEADER:-}
+      CLIENT_IP_TRUSTED_CIDRS: ${CLIENT_IP_TRUSTED_CIDRS:-}
+      CLIENT_IP_TRUSTED_PROXIES: ${CLIENT_IP_TRUSTED_PROXIES:-1}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    networks:
+      - pulsewatch-network
+
+  # ----------------------------------------------------------------------------
+  # Probe Scheduler Service
+  # ----------------------------------------------------------------------------
+  scheduler:
+    build:
+      context: ./pulsewatch-scheduler
+      dockerfile: Dockerfile
+    container_name: pulsewatch-scheduler
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-pulsewatch}:${POSTGRES_PASSWORD:-pulsewatch_secret}@postgres:5432/${POSTGRES_DB:-pulsewatch}?sslmode=disable
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-pulsewatch}:${RABBITMQ_DEFAULT_PASS:-pulsewatch_secret}@rabbitmq:5672/
+      SCHEDULER_POLL_INTERVAL_SEC: ${SCHEDULER_POLL_INTERVAL_SEC:-5}
+      SCHEDULER_BATCH_SIZE: ${SCHEDULER_BATCH_SIZE:-50}
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    networks:
+      - pulsewatch-network
+
+  # ----------------------------------------------------------------------------
+  # Concurrent Probe Worker Service
+  # ----------------------------------------------------------------------------
+  probe-worker:
+    build:
+      context: ./pulsewatch-probe-worker
+      dockerfile: Dockerfile
+    container_name: pulsewatch-probe-worker
+    restart: unless-stopped
+    environment:
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-pulsewatch}:${RABBITMQ_DEFAULT_PASS:-pulsewatch_secret}@rabbitmq:5672/
+      PROBE_WORKER_CONCURRENCY: ${PROBE_WORKER_CONCURRENCY:-20}
+      PROBE_WORKER_PREFETCH: ${PROBE_WORKER_PREFETCH:-20}
+      PROBE_REGION: ${PROBE_REGION:-default}
+      ALLOW_INTERNAL_PROBES: ${ALLOW_INTERNAL_PROBES:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - pulsewatch-network
+
+  # ----------------------------------------------------------------------------
+  # Notification & Alert Dispatcher Service (Stateless - RabbitMQ & SMTP)
+  # ----------------------------------------------------------------------------
+  notification-service:
+    build:
+      context: ./pulsewatch-notification-service
+      dockerfile: Dockerfile
+    container_name: pulsewatch-notification-service
+    restart: unless-stopped
+    environment:
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-pulsewatch}:${RABBITMQ_DEFAULT_PASS:-pulsewatch_secret}@rabbitmq:5672/
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-PulseWatch <alerts@pulsewatch.dev>}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
     networks:
       - pulsewatch-network
 
