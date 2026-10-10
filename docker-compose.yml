@@ -21,9 +21,42 @@ services:
     networks:
       - pulsewatch-network
 
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: pulsewatch-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-pulsewatch}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-pulsewatch_secret}
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - pulsewatch-network
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: pulsewatch-mailpit
+    restart: unless-stopped
+    ports:
+      - "${SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_PORT:-8025}:8025"
+    networks:
+      - pulsewatch-network
+
 volumes:
   postgres_data:
     name: pulsewatch_postgres_data
+  rabbitmq_data:
+    name: pulsewatch_rabbitmq_data
 
 networks:
   pulsewatch-network:
