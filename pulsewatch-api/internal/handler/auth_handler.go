@@ -265,12 +265,12 @@ func (h *AuthHandler) ResendVerification(w http.ResponseWriter, r *http.Request)
 // -----------------------------------------------------------------------------
 
 func (h *AuthHandler) getRefreshToken(r *http.Request) string {
-	// 1. Check HttpOnly cookie
+	// Check HttpOnly cookie
 	if cookie, err := r.Cookie("refresh_token"); err == nil && cookie.Value != "" {
 		return cookie.Value
 	}
 
-	// 2. Check JSON request body
+	// Check JSON request body
 	var req RefreshTokenRequest
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	return req.RefreshToken

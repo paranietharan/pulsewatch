@@ -74,6 +74,7 @@ func (r *ForgotPasswordRequest) Validate() error {
 type ResetPasswordRequest struct {
 	Token       string `json:"token"`
 	NewPassword string `json:"new_password"`
+	Password    string `json:"password,omitempty"`
 }
 
 func (r *ResetPasswordRequest) Validate() error {
@@ -81,11 +82,14 @@ func (r *ResetPasswordRequest) Validate() error {
 	if r.Token == "" {
 		return errors.New("reset token is required")
 	}
+	if r.NewPassword == "" && r.Password != "" {
+		r.NewPassword = r.Password
+	}
 	if len(r.NewPassword) < 8 {
-		return errors.New("new_password must be at least 8 characters long")
+		return errors.New("password must be at least 8 characters long")
 	}
 	if len(r.NewPassword) > 72 {
-		return errors.New("new_password must not exceed 72 characters")
+		return errors.New("password must not exceed 72 characters")
 	}
 	return nil
 }
