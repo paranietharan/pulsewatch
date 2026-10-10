@@ -1,0 +1,31 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pulsewatch-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-pulsewatch}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pulsewatch_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-pulsewatch}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-pulsewatch} -d $${POSTGRES_DB:-pulsewatch}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - pulsewatch-network
+
+volumes:
+  postgres_data:
+    name: pulsewatch_postgres_data
+
+networks:
+  pulsewatch-network:
+    name: pulsewatch_network
+    driver: bridge

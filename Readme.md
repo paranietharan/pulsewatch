@@ -1,3 +1,1 @@
 # PulseWatch
-
-## Overall Diagram
