@@ -20,13 +20,13 @@ func TestTokenService_JWTFlow(t *testing.T) {
 		LastName:  "Doe",
 	}
 
-	// 1. Generate token
+	// Generate token
 	tokenStr, err := svc.GenerateAccessToken(user)
 	if err != nil {
 		t.Fatalf("failed to generate access token: %v", err)
 	}
 
-	// 2. Validate valid token
+	// Validate valid token
 	claims, err := svc.ValidateAccessToken(tokenStr)
 	if err != nil {
 		t.Fatalf("expected valid token, got error: %v", err)
@@ -41,14 +41,14 @@ func TestTokenService_JWTFlow(t *testing.T) {
 		t.Errorf("expected role %s, got %s", user.Role, claims.Role)
 	}
 
-	// 3. Reject tampered token
+	// Reject tampered token
 	tampered := tokenStr + "tampered"
 	_, err = svc.ValidateAccessToken(tampered)
 	if err == nil {
 		t.Errorf("expected error on tampered token, got nil")
 	}
 
-	// 4. Reject token signed with different secret
+	// Reject token signed with different secret
 	diffSvc := NewTokenService("different_secret_key_1234567890", 2*time.Second)
 	_, err = diffSvc.ValidateAccessToken(tokenStr)
 	if err == nil {

@@ -16,6 +16,7 @@ import (
 	"pulsewatch-api/internal/handler"
 	"pulsewatch-api/internal/middleware"
 	"pulsewatch-api/internal/outbox"
+	"pulsewatch-api/internal/processor"
 	"pulsewatch-api/internal/rabbitmq"
 	"pulsewatch-api/internal/repository"
 	"pulsewatch-api/internal/service"
@@ -64,6 +65,7 @@ func main() {
 	userRepo := repository.NewUserRepository(db.Pool)
 	tokenRepo := repository.NewTokenRepository(db.Pool)
 	outboxRepo := repository.NewOutboxRepository(db.Pool)
+	monitorRepo := repository.NewMonitorRepository(db.Pool)
 
 	// Initialize Services
 	pwdService := service.NewPasswordService()
@@ -84,8 +86,17 @@ func main() {
 	dispatcher := outbox.NewDispatcher(outboxRepo, rmqClient, logger)
 	go dispatcher.Start(outboxCtx)
 
+	// Start Check-Result and Outcome Processor in background
+	resultProcessor := processor.NewResultProcessor(db.Pool, rmqClient, logger)
+	go func() {
+		if err := resultProcessor.Start(outboxCtx); err != nil {
+			logger.Error("Result processor consumer stopped", "error", err)
+		}
+	}()
+
 	// Setup Router and Middlewares
 	authHandler := handler.NewAuthHandler(authService, cfg)
+	monitorHandler := handler.NewMonitorHandler(monitorRepo)
 	strictRateLimiter := middleware.NewRateLimiter(0.2, 5) // 1 token every 5 sec, burst capacity 5
 
 	r := chi.NewRouter()
@@ -123,6 +134,30 @@ func main() {
 				r.Use(middleware.AuthMiddleware(tokenService))
 				r.Get("/me", authHandler.Me)
 			})
+		})
+
+		// Protected endpoints
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.AuthMiddleware(tokenService))
+
+			// Monitors
+			r.Post("/monitors", monitorHandler.CreateMonitor)
+			r.Get("/monitors", monitorHandler.ListMonitors)
+			r.Get("/monitors/{monitorID}", monitorHandler.GetMonitor)
+			r.Patch("/monitors/{monitorID}", monitorHandler.UpdateMonitor)
+			r.Delete("/monitors/{monitorID}", monitorHandler.DeleteMonitor)
+			r.Post("/monitors/{monitorID}/enable", monitorHandler.EnableMonitor)
+			r.Post("/monitors/{monitorID}/disable", monitorHandler.DisableMonitor)
+			r.Get("/monitors/{monitorID}/results", monitorHandler.GetResults)
+			r.Get("/monitors/{monitorID}/incidents", monitorHandler.GetIncidents)
+
+			// Dashboard Summary
+			r.Get("/dashboard/summary", monitorHandler.GetDashboardSummary)
+
+			// Alert Channels
+			r.Get("/alert-channels", monitorHandler.ListAlertChannels)
+			r.Post("/alert-channels", monitorHandler.CreateAlertChannel)
+			r.Delete("/alert-channels/{channelID}", monitorHandler.DeleteAlertChannel)
 		})
 	})
 

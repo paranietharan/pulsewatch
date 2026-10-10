@@ -89,7 +89,7 @@ func TestAuthFlow_EndToEnd(t *testing.T) {
 	testPassword := "CorrectPassword123!"
 
 	// -------------------------------------------------------------------------
-	// 1. Signup
+	// Signup
 	// -------------------------------------------------------------------------
 	signupBody, _ := json.Marshal(map[string]string{
 		"first_name": "Integration",
@@ -127,7 +127,7 @@ func TestAuthFlow_EndToEnd(t *testing.T) {
 	}
 
 	// -------------------------------------------------------------------------
-	// 2. Login Before Verification -> Should Fail (403 Forbidden)
+	// Login Before Verification -> Should Fail (403 Forbidden)
 	// -------------------------------------------------------------------------
 	loginBody, _ := json.Marshal(map[string]string{
 		"email":    testEmail,
@@ -143,7 +143,7 @@ func TestAuthFlow_EndToEnd(t *testing.T) {
 	}
 
 	// -------------------------------------------------------------------------
-	// 3. Email Verification
+	// Email Verification
 	// -------------------------------------------------------------------------
 	// Extract raw verification token from the outbox payload in PostgreSQL
 	var eventPayloadJSON []byte
@@ -185,7 +185,7 @@ func TestAuthFlow_EndToEnd(t *testing.T) {
 	}
 
 	// -------------------------------------------------------------------------
-	// 4. Successful Login After Verification
+	// Successful Login After Verification
 	// -------------------------------------------------------------------------
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(loginBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -221,7 +221,7 @@ func TestAuthFlow_EndToEnd(t *testing.T) {
 	}
 
 	// -------------------------------------------------------------------------
-	// 5. Get Current User (/me)
+	// Get Current User (/me)
 	// -------------------------------------------------------------------------
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil)
 	req.Header.Set("Authorization", "Bearer "+authResp.AccessToken)
@@ -241,7 +241,7 @@ func TestAuthFlow_EndToEnd(t *testing.T) {
 	}
 
 	// -------------------------------------------------------------------------
-	// 6. Refresh Token Rotation & Reuse Detection
+	// Refresh Token Rotation & Reuse Detection
 	// -------------------------------------------------------------------------
 	refreshBody, _ := json.Marshal(map[string]string{
 		"refresh_token": authResp.RefreshToken,
@@ -275,7 +275,7 @@ func TestAuthFlow_EndToEnd(t *testing.T) {
 	}
 
 	// -------------------------------------------------------------------------
-	// 7. Forgot Password & Password Reset Flow
+	// Forgot Password & Password Reset Flow
 	// -------------------------------------------------------------------------
 	forgotBody, _ := json.Marshal(map[string]string{"email": testEmail})
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/auth/forgot-password", bytes.NewReader(forgotBody))
@@ -341,7 +341,7 @@ func TestAuthFlow_EndToEnd(t *testing.T) {
 	}
 
 	// -------------------------------------------------------------------------
-	// 8. Logout
+	// Logout
 	// -------------------------------------------------------------------------
 	var newAuthResp service.AuthResponse
 	_ = json.Unmarshal(w.Body.Bytes(), &newAuthResp)

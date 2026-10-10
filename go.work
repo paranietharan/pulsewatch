@@ -4,4 +4,6 @@ use (
 	./pulse-watch-db
 	./pulsewatch-api
 	./pulsewatch-notification-service
+	./pulsewatch-probe-worker
+	./pulsewatch-scheduler
 )

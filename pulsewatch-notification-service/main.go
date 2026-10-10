@@ -1,18 +1,17 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net/smtp"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
+
+	"pulsewatch-notification-service/internal/notifier"
 
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
@@ -22,9 +21,16 @@ import (
 const (
 	ExchangeName                      = "pulsewatch.direct"
 	EmailQueue                        = "notifications.email"
+	WebhookQueue                      = "notifications.webhook"
+	DeliveryOutcomeQueue              = "notifications.delivery_outcome"
+
 	RoutingKeyEmailVerification       = "notification.email.verification.requested"
 	RoutingKeyEmailPasswordReset      = "notification.email.password_reset.requested"
 	RoutingKeyEmailResendVerification = "notification.email.resend_verification.requested"
+	RoutingKeyEmailIncidentOpened     = "notification.email.incident.opened"
+	RoutingKeyEmailIncidentResolved   = "notification.email.incident.resolved"
+	RoutingKeyWebhookDispatch         = "notification.webhook.dispatch"
+	RoutingKeyDeliveryOutcome         = "notification.delivery.outcome"
 )
 
 type BaseEvent struct {
@@ -52,69 +58,49 @@ type PasswordResetEmailPayload struct {
 	ExpiresAt  time.Time `json:"expires_at"`
 }
 
-type EmailSender struct {
-	host     string
-	port     int
-	user     string
-	password string
-	from     string
+type IncidentOpenedEmailPayload struct {
+	MonitorID   uuid.UUID `json:"monitor_id"`
+	MonitorName string    `json:"monitor_name"`
+	MonitorURL  string    `json:"monitor_url"`
+	Email       string    `json:"email"`
+	Cause       string    `json:"cause"`
+	StartedAt   time.Time `json:"started_at"`
 }
 
-func NewEmailSender() *EmailSender {
-	port, err := strconv.Atoi(getEnv("SMTP_PORT", "1025"))
-	if err != nil {
-		port = 1025
-	}
-	return &EmailSender{
-		host:     getEnv("SMTP_HOST", "localhost"),
-		port:     port,
-		user:     getEnv("SMTP_USER", ""),
-		password: getEnv("SMTP_PASSWORD", ""),
-		from:     getEnv("SMTP_FROM", "PulseWatch <alerts@pulsewatch.dev>"),
-	}
+type IncidentResolvedEmailPayload struct {
+	MonitorID       uuid.UUID `json:"monitor_id"`
+	MonitorName     string    `json:"monitor_name"`
+	MonitorURL      string    `json:"monitor_url"`
+	Email           string    `json:"email"`
+	DurationSeconds int       `json:"duration_seconds"`
+	ResolvedAt      time.Time `json:"resolved_at"`
 }
 
-func (s *EmailSender) Send(to, subject, textBody, htmlBody string) error {
-	addr := fmt.Sprintf("%s:%d", s.host, s.port)
-	var auth smtp.Auth
-	if s.user != "" {
-		auth = smtp.PlainAuth("", s.user, s.password, s.host)
-	}
+type WebhookDispatchPayload struct {
+	DeliveryID      uuid.UUID  `json:"delivery_id"`
+	ChannelID       uuid.UUID  `json:"channel_id"`
+	TargetURL       string     `json:"target_url"`
+	Secret          string     `json:"secret,omitempty"`
+	EventType       string     `json:"event_type"`
+	IncidentID      uuid.UUID  `json:"incident_id"`
+	MonitorID       uuid.UUID  `json:"monitor_id"`
+	MonitorName     string     `json:"monitor_name"`
+	Status          string     `json:"status"`
+	CauseSummary    string     `json:"cause_summary,omitempty"`
+	StartedAt       time.Time  `json:"started_at"`
+	ResolvedAt      *time.Time `json:"resolved_at,omitempty"`
+	DurationSeconds *int       `json:"duration_seconds,omitempty"`
+	Timestamp       time.Time  `json:"timestamp"`
+}
 
-	boundary := fmt.Sprintf("boundary_%d", time.Now().UnixNano())
-
-	var msg bytes.Buffer
-	msg.WriteString(fmt.Sprintf("From: %s\r\n", s.from))
-	msg.WriteString(fmt.Sprintf("To: %s\r\n", to))
-	msg.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
-	msg.WriteString("MIME-Version: 1.0\r\n")
-	msg.WriteString(fmt.Sprintf("Content-Type: multipart/alternative; boundary=\"%s\"\r\n\r\n", boundary))
-
-	// Plain text
-	msg.WriteString(fmt.Sprintf("--%s\r\n", boundary))
-	msg.WriteString("Content-Type: text/plain; charset=\"UTF-8\"\r\n")
-	msg.WriteString("Content-Transfer-Encoding: 7bit\r\n\r\n")
-	msg.WriteString(textBody)
-	msg.WriteString("\r\n\r\n")
-
-	// HTML
-	msg.WriteString(fmt.Sprintf("--%s\r\n", boundary))
-	msg.WriteString("Content-Type: text/html; charset=\"UTF-8\"\r\n")
-	msg.WriteString("Content-Transfer-Encoding: 7bit\r\n\r\n")
-	msg.WriteString(htmlBody)
-	msg.WriteString("\r\n\r\n")
-
-	msg.WriteString(fmt.Sprintf("--%s--\r\n", boundary))
-
-	// Extract raw email address for MAIL FROM envelope
-	fromAddr := s.from
-	if start := strings.Index(fromAddr, "<"); start != -1 {
-		if end := strings.Index(fromAddr, ">"); end != -1 && end > start {
-			fromAddr = fromAddr[start+1 : end]
-		}
-	}
-
-	return smtp.SendMail(addr, auth, fromAddr, []string{to}, msg.Bytes())
+type DeliveryOutcomePayload struct {
+	DeliveryID   uuid.UUID `json:"delivery_id"`
+	IncidentID   uuid.UUID `json:"incident_id"`
+	ChannelID    uuid.UUID `json:"channel_id"`
+	ChannelType  string    `json:"channel_type"`
+	Status       string    `json:"status"`
+	AttemptCount int       `json:"attempt_count"`
+	LastError    string    `json:"last_error,omitempty"`
 }
 
 func main() {
@@ -127,228 +113,339 @@ func main() {
 
 	rmqURL := getEnv("RABBITMQ_URL", "amqp://pulsewatch:pulsewatch_secret@localhost:5672/")
 	frontendURL := getEnv("FRONTEND_URL", "http://localhost:3000")
-	emailSender := NewEmailSender()
 
-	logger.Info("Starting PulseWatch Notification Service...",
-		"smtp_host", emailSender.host,
-		"smtp_port", emailSender.port,
-		"smtp_from", emailSender.from,
-	)
-
-	conn, err := amqp.Dial(rmqURL)
-	if err != nil {
-		logger.Error("Failed to connect to RabbitMQ", "error", err)
-		os.Exit(1)
-	}
-	defer conn.Close()
-
-	ch, err := conn.Channel()
-	if err != nil {
-		logger.Error("Failed to open RabbitMQ channel", "error", err)
-		os.Exit(1)
-	}
-	defer ch.Close()
-
-	// 1. Declare Exchange
-	err = ch.ExchangeDeclare(
-		ExchangeName,
-		"direct",
-		true,
-		false,
-		false,
-		false,
-		nil,
-	)
-	if err != nil {
-		logger.Error("Failed to declare exchange", "error", err)
-		os.Exit(1)
-	}
-
-	// 2. Declare Queue
-	_, err = ch.QueueDeclare(
-		EmailQueue,
-		true,
-		false,
-		false,
-		false,
-		nil,
-	)
-	if err != nil {
-		logger.Error("Failed to declare queue", "error", err)
-		os.Exit(1)
-	}
-
-	// 3. Bind routing keys
-	for _, key := range []string{RoutingKeyEmailVerification, RoutingKeyEmailPasswordReset, RoutingKeyEmailResendVerification} {
-		if err := ch.QueueBind(EmailQueue, key, ExchangeName, false, nil); err != nil {
-			logger.Error("Failed to bind queue", "key", key, "error", err)
-			os.Exit(1)
-		}
-	}
-
-	// 4. Set prefetch count
-	if err := ch.Qos(10, 0, false); err != nil {
-		logger.Error("Failed to set QoS", "error", err)
-		os.Exit(1)
-	}
-
-	msgs, err := ch.Consume(
-		EmailQueue,
-		"notification-worker",
-		false, // manual ack
-		false,
-		false,
-		false,
-		nil,
-	)
-	if err != nil {
-		logger.Error("Failed to register consumer", "error", err)
-		os.Exit(1)
-	}
-
-	logger.Info("Notification Service listening for email jobs on queue", "queue", EmailQueue)
+	logger.Info("Starting PulseWatch Notification Dispatch Service (Database-Free)...")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go func() {
-		for d := range msgs {
-			start := time.Now()
-			var evt BaseEvent
-			if err := json.Unmarshal(d.Body, &evt); err != nil {
-				logger.Error("Failed to deserialize event envelope", "error", err)
-				_ = d.Nack(false, false)
-				continue
-			}
+	// Connect to RabbitMQ
+	rmqConn, err := amqp.Dial(rmqURL)
+	if err != nil {
+		logger.Error("Failed to connect to RabbitMQ", "error", err)
+		os.Exit(1)
+	}
+	defer rmqConn.Close()
+	logger.Info("Connected to RabbitMQ successfully")
 
-			var sendErr error
-			var recipient string
+	// Initialize Notifiers
+	emailSender := notifier.NewEmailSender()
+	webhookNotifier := notifier.NewWebhookNotifier()
 
-			switch d.RoutingKey {
-			case RoutingKeyEmailVerification, RoutingKeyEmailResendVerification:
-				var p VerificationEmailPayload
-				if err := json.Unmarshal(evt.Payload, &p); err != nil {
-					logger.Error("Failed to deserialize verification payload", "error", err)
-					_ = d.Nack(false, false)
-					continue
-				}
+	// Start Email Dispatch Consumer in background
+	go startEmailConsumer(ctx, rmqConn, emailSender, frontendURL, logger)
 
-				recipient = p.Email
-				verificationLink := fmt.Sprintf("%s/verify-email?token=%s", frontendURL, p.VerificationToken)
-				subject := "Verify your PulseWatch account"
-				textBody := fmt.Sprintf("Hi %s,\n\nPlease verify your email address by visiting:\n%s\n\nThis link will expire at %s.\n\nThanks,\nPulseWatch Team",
-					p.Name, verificationLink, p.ExpiresAt.Format(time.RFC1123))
+	// Start Webhook Dispatch Consumer in background
+	go startWebhookConsumer(ctx, rmqConn, webhookNotifier, logger)
 
-				htmlBody := fmt.Sprintf(`<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #0b0f19; color: #f3f4f6; margin: 0; padding: 40px 20px; }
-    .card { max-width: 540px; margin: 0 auto; background-color: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 32px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
-    .logo { font-size: 24px; font-weight: bold; color: #38bdf8; margin-bottom: 24px; letter-spacing: -0.5px; }
-    h1 { font-size: 20px; color: #ffffff; margin-bottom: 16px; }
-    p { font-size: 14px; line-height: 1.6; color: #9ca3af; margin-bottom: 24px; }
-    .btn { display: inline-block; background-color: #0284c7; color: #ffffff !important; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; font-size: 14px; }
-    .btn:hover { background-color: #0369a1; }
-    .footer { font-size: 12px; color: #6b7280; margin-top: 32px; border-top: 1px solid #1f2937; padding-top: 16px; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="logo">⚡ PulseWatch</div>
-    <h1>Verify your email address</h1>
-    <p>Hi %s,</p>
-    <p>Welcome to PulseWatch! Please confirm your email address by clicking the button below to activate your monitoring workspace.</p>
-    <p><a href="%s" class="btn" target="_blank">Verify Email Address</a></p>
-    <p>If the button doesn't work, copy and paste this URL into your browser:<br><span style="color: #38bdf8; word-break: break-all;">%s</span></p>
-    <div class="footer">
-      This verification link expires at %s.<br>If you did not sign up for PulseWatch, you can safely ignore this email.
-    </div>
-  </div>
-</body>
-</html>`, p.Name, verificationLink, verificationLink, p.ExpiresAt.Format(time.RFC1123))
-
-				sendErr = emailSender.Send(p.Email, subject, textBody, htmlBody)
-
-			case RoutingKeyEmailPasswordReset:
-				var p PasswordResetEmailPayload
-				if err := json.Unmarshal(evt.Payload, &p); err != nil {
-					logger.Error("Failed to deserialize password reset payload", "error", err)
-					_ = d.Nack(false, false)
-					continue
-				}
-
-				recipient = p.Email
-				resetLink := fmt.Sprintf("%s/reset-password?token=%s", frontendURL, p.ResetToken)
-				subject := "Reset your PulseWatch password"
-				textBody := fmt.Sprintf("Hi %s,\n\nA password reset was requested for your PulseWatch account. Visit:\n%s\n\nThis link will expire at %s.\n\nIf you did not request this, please ignore this email.\n\nThanks,\nPulseWatch Team",
-					p.Name, resetLink, p.ExpiresAt.Format(time.RFC1123))
-
-				htmlBody := fmt.Sprintf(`<!DOCTYPE html>
-						<html>
-						<head>
-						<meta charset="utf-8">
-						<style>
-							body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #0b0f19; color: #f3f4f6; margin: 0; padding: 40px 20px; }
-							.card { max-width: 540px; margin: 0 auto; background-color: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 32px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
-							.logo { font-size: 24px; font-weight: bold; color: #38bdf8; margin-bottom: 24px; letter-spacing: -0.5px; }
-							h1 { font-size: 20px; color: #ffffff; margin-bottom: 16px; }
-							p { font-size: 14px; line-height: 1.6; color: #9ca3af; margin-bottom: 24px; }
-							.btn { display: inline-block; background-color: #dc2626; color: #ffffff !important; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; font-size: 14px; }
-							.btn:hover { background-color: #b91c1c; }
-							.footer { font-size: 12px; color: #6b7280; margin-top: 32px; border-top: 1px solid #1f2937; padding-top: 16px; }
-						</style>
-						</head>
-						<body>
-						<div class="card">
-							<div class="logo">⚡ PulseWatch</div>
-							<h1>Reset your password</h1>
-							<p>Hi %s,</p>
-							<p>We received a request to reset the password for your PulseWatch account. Click the button below to choose a new password.</p>
-							<p><a href="%s" class="btn" target="_blank">Reset Password</a></p>
-							<p>If the button doesn't work, copy and paste this URL into your browser:<br><span style="color: #38bdf8; word-break: break-all;">%s</span></p>
-							<div class="footer">
-							This link expires at %s.<br>If you did not request a password reset, please ignore this email or review your security settings.
-							</div>
-						</div>
-						</body>
-						</html>`, p.Name, resetLink, resetLink, p.ExpiresAt.Format(time.RFC1123))
-
-				sendErr = emailSender.Send(p.Email, subject, textBody, htmlBody)
-
-			default:
-				logger.Warn("Unknown routing key received", "routing_key", d.RoutingKey)
-			}
-
-			if sendErr != nil {
-				logger.Error("Failed to deliver email via SMTP (Mailpit)",
-					"recipient", maskEmail(recipient),
-					"error", sendErr,
-				)
-				_ = d.Nack(false, true) // Requeue on transient SMTP error
-				continue
-			}
-
-			logger.Info("Email successfully sent via SMTP (Mailpit)",
-				"event_id", evt.EventID,
-				"event_type", d.RoutingKey,
-				"recipient", maskEmail(recipient),
-				"duration_ms", time.Since(start).Milliseconds(),
-			)
-
-			if err := d.Ack(false); err != nil {
-				logger.Error("Failed to ack message", "error", err)
-			}
-		}
-	}()
-
+	// Graceful Shutdown on SIGINT / SIGTERM
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
-	<-shutdown
 
+	sig := <-shutdown
+	logger.Info("Shutdown signal received, shutting down gracefully...", "signal", sig.String())
+	cancel()
+
+	time.Sleep(2 * time.Second)
 	logger.Info("PulseWatch Notification Service stopped gracefully")
-	_ = ctx
+}
+
+func startEmailConsumer(ctx context.Context, conn *amqp.Connection, sender *notifier.EmailSender, frontendURL string, logger *slog.Logger) {
+	ch, err := conn.Channel()
+	if err != nil {
+		logger.Error("Failed to open email channel", "error", err)
+		return
+	}
+	defer ch.Close()
+
+	// Declare exchange and email queue
+	_ = ch.ExchangeDeclare(ExchangeName, "direct", true, false, false, false, nil)
+	_, _ = ch.QueueDeclare(EmailQueue, true, false, false, false, nil)
+
+	emailBindings := []string{
+		RoutingKeyEmailVerification,
+		RoutingKeyEmailPasswordReset,
+		RoutingKeyEmailResendVerification,
+		RoutingKeyEmailIncidentOpened,
+		RoutingKeyEmailIncidentResolved,
+	}
+	for _, key := range emailBindings {
+		_ = ch.QueueBind(EmailQueue, key, ExchangeName, false, nil)
+	}
+
+	_ = ch.Qos(10, 0, false)
+
+	msgs, err := ch.Consume(
+		EmailQueue,
+		"notification-email-worker",
+		false,
+		false,
+		false,
+		false,
+		nil,
+	)
+	if err != nil {
+		logger.Error("Failed to register email consumer", "error", err)
+		return
+	}
+
+	logger.Info("Email notification worker listening on queue", "queue", EmailQueue)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case d, ok := <-msgs:
+			if !ok {
+				return
+			}
+			processEmailDelivery(d, sender, frontendURL, logger)
+		}
+	}
+}
+
+func processEmailDelivery(d amqp.Delivery, sender *notifier.EmailSender, frontendURL string, logger *slog.Logger) {
+	start := time.Now()
+
+	var payloadBytes []byte
+	var evt BaseEvent
+	if err := json.Unmarshal(d.Body, &evt); err == nil && len(evt.Payload) > 0 {
+		payloadBytes = evt.Payload
+	} else {
+		payloadBytes = d.Body
+	}
+
+	var sendErr error
+	var recipient string
+
+	switch d.RoutingKey {
+	case RoutingKeyEmailVerification, RoutingKeyEmailResendVerification:
+		var p VerificationEmailPayload
+		if err := json.Unmarshal(payloadBytes, &p); err != nil {
+			logger.Error("Failed to deserialize verification payload", "error", err)
+			_ = d.Nack(false, false)
+			return
+		}
+
+		recipient = p.Email
+		verificationLink := fmt.Sprintf("%s/verify-email?token=%s", frontendURL, p.VerificationToken)
+		subject := "Verify your PulseWatch account"
+		textBody := fmt.Sprintf("Hi %s,\n\nPlease verify your email address by visiting:\n%s\n\nThis link expires at %s.\n\nPulseWatch Team",
+			p.Name, verificationLink, p.ExpiresAt.Format(time.RFC1123))
+
+		htmlBody := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<body style="font-family: -apple-system, sans-serif; background: #0b0f19; color: #f3f4f6; padding: 30px;">
+  <div style="max-width: 520px; margin: 0 auto; background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 28px;">
+    <div style="font-size: 22px; font-weight: bold; color: #38bdf8; margin-bottom: 16px;">⚡ PulseWatch</div>
+    <h1 style="font-size: 18px; color: #fff;">Verify your email address</h1>
+    <p style="color: #9ca3af; font-size: 14px; line-height: 1.5;">Hi %s, please click the button below to verify your account.</p>
+    <p style="margin: 24px 0;"><a href="%s" style="background: #0284c7; color: #fff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 14px;" target="_blank">Verify Email Address</a></p>
+    <p style="color: #6b7280; font-size: 12px;">Link expires at %s.</p>
+  </div>
+</body>
+</html>`, p.Name, verificationLink, p.ExpiresAt.Format(time.RFC1123))
+
+		sendErr = sender.Send(p.Email, subject, textBody, htmlBody)
+
+	case RoutingKeyEmailPasswordReset:
+		var p PasswordResetEmailPayload
+		if err := json.Unmarshal(payloadBytes, &p); err != nil {
+			logger.Error("Failed to deserialize password reset payload", "error", err)
+			_ = d.Nack(false, false)
+			return
+		}
+
+		recipient = p.Email
+		resetLink := fmt.Sprintf("%s/reset-password?token=%s", frontendURL, p.ResetToken)
+		subject := "Reset your PulseWatch password"
+		textBody := fmt.Sprintf("Hi %s,\n\nA password reset was requested. Visit:\n%s\n\nExpires at: %s.\n\nPulseWatch Team",
+			p.Name, resetLink, p.ExpiresAt.Format(time.RFC1123))
+
+		htmlBody := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<body style="font-family: -apple-system, sans-serif; background: #0b0f19; color: #f3f4f6; padding: 30px;">
+  <div style="max-width: 520px; margin: 0 auto; background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 28px;">
+    <div style="font-size: 22px; font-weight: bold; color: #38bdf8; margin-bottom: 16px;">⚡ PulseWatch</div>
+    <h1 style="font-size: 18px; color: #fff;">Reset your password</h1>
+    <p style="color: #9ca3af; font-size: 14px; line-height: 1.5;">Hi %s, click below to set a new password for your account.</p>
+    <p style="margin: 24px 0;"><a href="%s" style="background: #dc2626; color: #fff; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 14px;" target="_blank">Reset Password</a></p>
+    <p style="color: #6b7280; font-size: 12px;">Link expires at %s.</p>
+  </div>
+</body>
+</html>`, p.Name, resetLink, p.ExpiresAt.Format(time.RFC1123))
+
+		sendErr = sender.Send(p.Email, subject, textBody, htmlBody)
+
+	case RoutingKeyEmailIncidentOpened:
+		var p IncidentOpenedEmailPayload
+		if err := json.Unmarshal(payloadBytes, &p); err != nil {
+			logger.Error("Failed to deserialize incident opened payload", "error", err)
+			_ = d.Nack(false, false)
+			return
+		}
+
+		recipient = p.Email
+		sendErr = sender.SendIncidentOpened(p.Email, p.MonitorName, p.MonitorURL, p.Cause, p.StartedAt)
+
+	case RoutingKeyEmailIncidentResolved:
+		var p IncidentResolvedEmailPayload
+		if err := json.Unmarshal(payloadBytes, &p); err != nil {
+			logger.Error("Failed to deserialize incident resolved payload", "error", err)
+			_ = d.Nack(false, false)
+			return
+		}
+
+		recipient = p.Email
+		sendErr = sender.SendIncidentResolved(p.Email, p.MonitorName, p.MonitorURL, p.DurationSeconds, p.ResolvedAt)
+
+	default:
+		logger.Warn("Unknown routing key received on email queue", "routing_key", d.RoutingKey)
+	}
+
+	if sendErr != nil {
+		logger.Error("Failed to deliver email via SMTP",
+			"recipient", maskEmail(recipient),
+			"error", sendErr,
+		)
+		_ = d.Nack(false, true)
+		return
+	}
+
+	logger.Info("Email successfully delivered via SMTP",
+		"event_type", d.RoutingKey,
+		"recipient", maskEmail(recipient),
+		"duration_ms", time.Since(start).Milliseconds(),
+	)
+
+	_ = d.Ack(false)
+}
+
+func startWebhookConsumer(ctx context.Context, conn *amqp.Connection, notifierInstance *notifier.WebhookNotifier, logger *slog.Logger) {
+	ch, err := conn.Channel()
+	if err != nil {
+		logger.Error("Failed to open webhook channel", "error", err)
+		return
+	}
+	defer ch.Close()
+
+	pubCh, err := conn.Channel()
+	if err != nil {
+		logger.Error("Failed to open webhook response publisher channel", "error", err)
+		return
+	}
+	defer pubCh.Close()
+
+	_ = ch.ExchangeDeclare(ExchangeName, "direct", true, false, false, false, nil)
+	_, _ = ch.QueueDeclare(WebhookQueue, true, false, false, false, nil)
+	_ = ch.QueueBind(WebhookQueue, RoutingKeyWebhookDispatch, ExchangeName, false, nil)
+
+	_ = ch.Qos(10, 0, false)
+
+	msgs, err := ch.Consume(
+		WebhookQueue,
+		"notification-webhook-worker",
+		false,
+		false,
+		false,
+		false,
+		nil,
+	)
+	if err != nil {
+		logger.Error("Failed to register webhook consumer", "error", err)
+		return
+	}
+
+	logger.Info("Webhook notification worker listening on queue", "queue", WebhookQueue)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case d, ok := <-msgs:
+			if !ok {
+				return
+			}
+			processWebhookDelivery(ctx, d, notifierInstance, pubCh, logger)
+		}
+	}
+}
+
+func processWebhookDelivery(ctx context.Context, d amqp.Delivery, notifierInstance *notifier.WebhookNotifier, pubCh *amqp.Channel, logger *slog.Logger) {
+	start := time.Now()
+
+	var payloadBytes []byte
+	var evt BaseEvent
+	if err := json.Unmarshal(d.Body, &evt); err == nil && len(evt.Payload) > 0 {
+		payloadBytes = evt.Payload
+	} else {
+		payloadBytes = d.Body
+	}
+
+	var p WebhookDispatchPayload
+	if err := json.Unmarshal(payloadBytes, &p); err != nil {
+		logger.Error("Failed to deserialize webhook dispatch payload", "error", err)
+		_ = d.Nack(false, false)
+		return
+	}
+
+	webhookPayload := notifier.WebhookPayload{
+		EventID:         p.DeliveryID,
+		EventType:       p.EventType,
+		IncidentID:      p.IncidentID,
+		MonitorID:       p.MonitorID,
+		MonitorName:     p.MonitorName,
+		TargetURL:       p.TargetURL,
+		Status:          p.Status,
+		CauseSummary:    p.CauseSummary,
+		StartedAt:       p.StartedAt,
+		ResolvedAt:      p.ResolvedAt,
+		DurationSeconds: p.DurationSeconds,
+		Timestamp:       p.Timestamp,
+	}
+
+	status, attempts, deliverErr := notifierInstance.Deliver(ctx, p.DeliveryID, p.TargetURL, p.Secret, webhookPayload)
+	var lastErrStr string
+	if deliverErr != nil {
+		lastErrStr = deliverErr.Error()
+	}
+
+	// Publish delivery outcome back to RabbitMQ for pulsewatch-api persistence
+	outcome := DeliveryOutcomePayload{
+		DeliveryID:   p.DeliveryID,
+		IncidentID:   p.IncidentID,
+		ChannelID:    p.ChannelID,
+		ChannelType:  "WEBHOOK",
+		Status:       status,
+		AttemptCount: attempts,
+		LastError:    lastErrStr,
+	}
+
+	if outcomeBytes, err := json.Marshal(outcome); err == nil {
+		_ = pubCh.PublishWithContext(
+			ctx,
+			ExchangeName,
+			RoutingKeyDeliveryOutcome,
+			false,
+			false,
+			amqp.Publishing{
+				ContentType:  "application/json",
+				DeliveryMode: amqp.Persistent,
+				Timestamp:    time.Now().UTC(),
+				Body:         outcomeBytes,
+			},
+		)
+	}
+
+	logger.Info("Webhook dispatch completed",
+		"delivery_id", p.DeliveryID,
+		"target_url", p.TargetURL,
+		"status", status,
+		"attempts", attempts,
+		"duration_ms", time.Since(start).Milliseconds(),
+	)
+
+	_ = d.Ack(false)
 }
 
 func getEnv(key, fallback string) string {

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"pulsewatch-notification-service/internal/notifier"
 )
 
 type MailpitMessage struct {
@@ -22,11 +24,7 @@ type MailpitMessagesResponse struct {
 }
 
 func TestEmailSender_Mailpit(t *testing.T) {
-	sender := &EmailSender{
-		host: "localhost",
-		port: 1025,
-		from: "PulseWatch <alerts@pulsewatch.dev>",
-	}
+	sender := notifier.NewEmailSender()
 
 	testRecipient := fmt.Sprintf("test-%d@example.com", time.Now().UnixNano())
 	testSubject := "Test Email Verification"

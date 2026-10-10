@@ -59,7 +59,7 @@ func Connect(url string) (*Client, error) {
 
 // setupTopology declares durable exchange, queues, and routing bindings.
 func (c *Client) setupTopology() error {
-	// 1. Declare durable direct exchange
+	// Declare durable direct exchange
 	err := c.ch.ExchangeDeclare(
 		ExchangeName,
 		"direct",
@@ -73,33 +73,53 @@ func (c *Client) setupTopology() error {
 		return fmt.Errorf("failed to declare exchange '%s': %w", ExchangeName, err)
 	}
 
-	// 2. Declare durable notifications queue
-	_, err = c.ch.QueueDeclare(
-		EmailQueue,
-		true,  // durable
-		false, // auto-delete
-		false, // exclusive
-		false, // no-wait
-		nil,
-	)
-	if err != nil {
+	// Declare and bind durable email queue
+	if _, err := c.ch.QueueDeclare(EmailQueue, true, false, false, false, nil); err != nil {
 		return fmt.Errorf("failed to declare queue '%s': %w", EmailQueue, err)
 	}
-
-	// 3. Bind routing keys
-	keys := []string{
+	emailKeys := []string{
 		RoutingKeyEmailVerification,
 		RoutingKeyEmailPasswordReset,
 		RoutingKeyEmailResendVerification,
+		RoutingKeyEmailIncidentOpened,
+		RoutingKeyEmailIncidentResolved,
 	}
-
-	for _, key := range keys {
+	for _, key := range emailKeys {
 		if err := c.ch.QueueBind(EmailQueue, key, ExchangeName, false, nil); err != nil {
 			return fmt.Errorf("failed to bind queue '%s' to key '%s': %w", EmailQueue, key, err)
 		}
 	}
 
+	// Declare and bind durable webhook queue
+	if _, err := c.ch.QueueDeclare(WebhookQueue, true, false, false, false, nil); err != nil {
+		return fmt.Errorf("failed to declare queue '%s': %w", WebhookQueue, err)
+	}
+	if err := c.ch.QueueBind(WebhookQueue, RoutingKeyWebhookDispatch, ExchangeName, false, nil); err != nil {
+		return fmt.Errorf("failed to bind queue '%s': %w", WebhookQueue, err)
+	}
+
+	// Declare and bind durable delivery outcome queue
+	if _, err := c.ch.QueueDeclare(DeliveryOutcomeQueue, true, false, false, false, nil); err != nil {
+		return fmt.Errorf("failed to declare queue '%s': %w", DeliveryOutcomeQueue, err)
+	}
+	if err := c.ch.QueueBind(DeliveryOutcomeQueue, RoutingKeyDeliveryOutcome, ExchangeName, false, nil); err != nil {
+		return fmt.Errorf("failed to bind queue '%s': %w", DeliveryOutcomeQueue, err)
+	}
+
+	// Declare and bind durable monitor results queue
+	if _, err := c.ch.QueueDeclare(ResultsQueue, true, false, false, false, nil); err != nil {
+		return fmt.Errorf("failed to declare queue '%s': %w", ResultsQueue, err)
+	}
+	if err := c.ch.QueueBind(ResultsQueue, RoutingKeyResult, ExchangeName, false, nil); err != nil {
+		return fmt.Errorf("failed to bind queue '%s': %w", ResultsQueue, err)
+	}
+
 	return nil
+}
+
+// Connection returns the underlying amqp.Connection.
+func (c *Client) Connection() *amqp.Connection {
+	return c.conn
 }
 
 // PublishConfirm publishes a message and synchronously blocks until broker confirmation is received.
