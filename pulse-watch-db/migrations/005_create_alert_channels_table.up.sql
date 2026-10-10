@@ -1,10 +1,17 @@
 -- PulseWatch Database Migration: 005_create_alert_channels_table.up.sql
 -- Description: Create alert channels and monitor associations for automated notifications
 
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'alert_channel_type') THEN
+        CREATE TYPE alert_channel_type AS ENUM ('EMAIL', 'WEBHOOK', 'SLACK', 'DISCORD', 'PAGERDUTY');
+    END IF;
+END$$;
+
 CREATE TABLE IF NOT EXISTS alert_channels (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    type VARCHAR(30) NOT NULL, -- email, webhook, slack, pagerduty
+    type alert_channel_type NOT NULL,
     name VARCHAR(100) NOT NULL,
     config JSONB NOT NULL DEFAULT '{}'::jsonb, -- e.g. {"email": "ops@example.com"} or {"url": "https://api.webhook.com"}
     is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
