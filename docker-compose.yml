@@ -42,6 +42,16 @@ services:
     networks:
       - pulsewatch-network
 
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: pulsewatch-mailpit
+    restart: unless-stopped
+    ports:
+      - "${SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_PORT:-8025}:8025"
+    networks:
+      - pulsewatch-network
+
 volumes:
   postgres_data:
     name: pulsewatch_postgres_data
