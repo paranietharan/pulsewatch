@@ -1,25 +1,6 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, Plus_Jakarta_Sans, JetBrains_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/theme/ThemeProvider";
 import "./globals.css";
-
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-inter",
-  display: "swap",
-});
-
-const jakarta = Plus_Jakarta_Sans({
-  subsets: ["latin"],
-  variable: "--font-heading",
-  display: "swap",
-});
-
-const mono = JetBrains_Mono({
-  subsets: ["latin"],
-  variable: "--font-mono",
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   title: "PulseWatch — Distributed Uptime & API Performance Monitoring",
@@ -65,7 +46,7 @@ const themeInitScript = `
   (function() {
     try {
       var stored = localStorage.getItem('pulsewatch-theme');
-      var isDark = stored ? stored === 'dark' : true; // Default dark
+      var isDark = stored ? stored === 'dark' : true;
       if (stored === 'system') {
         isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
       }
@@ -89,7 +70,7 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${inter.variable} ${jakarta.variable} ${mono.variable} dark`}
+      className="dark"
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />

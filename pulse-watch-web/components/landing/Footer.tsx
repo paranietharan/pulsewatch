@@ -37,8 +37,8 @@ export function Footer() {
           >
             Mailpit Inbox
           </a>
-          <a href="#demo" className="hover:text-neutral-900 dark:hover:text-white transition-colors">
-            Live Console
+          <a href="#features" className="hover:text-neutral-900 dark:hover:text-white transition-colors">
+            Features
           </a>
         </div>
       </div>

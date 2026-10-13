@@ -7,7 +7,6 @@ export function Navbar() {
   return (
     <header className="sticky top-0 z-50 backdrop-blur-md bg-white/85 dark:bg-[#07090e]/85 border-b border-neutral-200/80 dark:border-neutral-800/80 transition-colors">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-        {/* Brand Logo */}
         <Link href="/" className="flex items-center gap-2.5 group">
           <div className="w-7 h-7 rounded-lg bg-neutral-100 dark:bg-[#0d121f] border border-neutral-200 dark:border-neutral-800 flex items-center justify-center p-0.5 group-hover:border-emerald-500/50 transition-colors">
             <PulseLogoIcon className="w-full h-full" />
@@ -22,29 +21,15 @@ export function Navbar() {
           </div>
         </Link>
 
-        {/* Navigation Links */}
         <nav className="hidden md:flex items-center gap-7 text-xs font-medium text-neutral-600 dark:text-neutral-400">
           <a href="#features" className="hover:text-neutral-900 dark:hover:text-white transition-colors">
             Features
-          </a>
-          <a href="#demo" className="hover:text-neutral-900 dark:hover:text-white transition-colors">
-            Live Console
-          </a>
-          <a href="#simulator" className="hover:text-neutral-900 dark:hover:text-white transition-colors">
-            Noise Filter
-          </a>
-          <a href="#architecture" className="hover:text-neutral-900 dark:hover:text-white transition-colors">
-            Architecture
-          </a>
-          <a href="#calculator" className="hover:text-neutral-900 dark:hover:text-white transition-colors">
-            ROI Calculator
           </a>
           <a href="#pricing" className="hover:text-neutral-900 dark:hover:text-white transition-colors">
             Pricing
           </a>
         </nav>
 
-        {/* Status Badge, Theme Toggle & Actions */}
         <div className="flex items-center gap-2.5">
           <div className="hidden lg:flex items-center gap-2 px-2.5 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-500/20 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
             <span className="radar-beacon" />
@@ -60,11 +45,10 @@ export function Navbar() {
             API Status
           </a>
 
-          {/* Minimal Dark / Light Theme Toggle */}
           <ThemeToggle />
 
           <a
-            href="#demo"
+            href="#pricing"
             className="inline-flex items-center justify-center px-3.5 py-1.5 rounded-lg font-semibold text-xs text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-100 transition-colors shadow-sm"
           >
             Start Monitoring
