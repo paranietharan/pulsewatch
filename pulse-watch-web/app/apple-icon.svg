@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" width="180" height="180">
+  <defs>
+    <linearGradient id="appleBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a101d" />
+      <stop offset="50%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+    <linearGradient id="applePulse" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="40%" stop-color="#00f2fe" />
+      <stop offset="70%" stop-color="#10b981" />
+      <stop offset="100%" stop-color="#34d399" />
+    </linearGradient>
+    <filter id="appleGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <rect width="180" height="180" rx="42" fill="url(#appleBg)" />
+  <circle cx="90" cy="90" r="60" fill="#38bdf8" opacity="0.08" />
+
+  <path d="M28 90 L62 90 L74 65 L88 120 L102 48 L116 108 L128 90 L152 90" 
+        fill="none" 
+        stroke="url(#applePulse)" 
+        stroke-width="9" 
+        stroke-linecap="round" 
+        stroke-linejoin="round" 
+        filter="url(#appleGlow)" />
+
+  <circle cx="102" cy="48" r="8" fill="#22c55e" filter="url(#appleGlow)" />
+  <circle cx="102" cy="48" r="4" fill="#ffffff" />
+</svg>

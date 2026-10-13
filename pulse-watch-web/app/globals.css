@@ -1,0 +1,105 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-heading: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+  min-height: 100vh;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  letter-spacing: -0.025em;
+}
+
+.bg-grid-mesh {
+  background-size: 32px 32px;
+  background-image: 
+    linear-gradient(to right, rgba(0, 0, 0, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.03) 1px, transparent 1px);
+}
+
+.dark .bg-grid-mesh {
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+}
+
+.bg-radial-ambient {
+  background: 
+    radial-gradient(circle 800px at 50% -120px, rgba(16, 185, 129, 0.05), transparent 70%),
+    radial-gradient(circle 600px at 90% 300px, rgba(6, 182, 212, 0.03), transparent 60%);
+}
+
+.dark .bg-radial-ambient {
+  background: 
+    radial-gradient(circle 800px at 50% -120px, rgba(16, 185, 129, 0.09), transparent 70%),
+    radial-gradient(circle 600px at 90% 300px, rgba(6, 182, 212, 0.05), transparent 60%);
+}
+
+.radar-beacon {
+  position: relative;
+  width: 7px;
+  height: 7px;
+  background-color: #10b981;
+  border-radius: 50%;
+}
+
+.radar-beacon::after {
+  content: "";
+  position: absolute;
+  top: -3.5px;
+  left: -3.5px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background-color: rgba(16, 185, 129, 0.35);
+  animation: radarRipple 2s cubic-bezier(0, 0.2, 0.8, 1) infinite;
+}
+
+@keyframes radarRipple {
+  0% {
+    transform: scale(0.6);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(150, 150, 150, 0.25);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(150, 150, 150, 0.45);
+}
