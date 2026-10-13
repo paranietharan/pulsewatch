@@ -1,10 +1,13 @@
-import { ApiError } from "@/types/api";
+import { ApiError, AuthResponse } from "@/types/api";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "http://localhost:8080";
 
 let memoryAccessToken: string | null = null;
-let refreshPromise: Promise<string | null> | null = null;
+let refreshPromise: Promise<AuthResponse | null> | null = null;
+
+type SessionExpiredListener = () => void;
+const sessionExpiredListeners: Set<SessionExpiredListener> = new Set();
 
 export function getAccessToken(): string | null {
   return memoryAccessToken;
@@ -12,6 +15,24 @@ export function getAccessToken(): string | null {
 
 export function setAccessToken(token: string | null) {
   memoryAccessToken = token;
+}
+
+export function onSessionExpired(listener: SessionExpiredListener): () => void {
+  sessionExpiredListeners.add(listener);
+  return () => {
+    sessionExpiredListeners.delete(listener);
+  };
+}
+
+function notifySessionExpired() {
+  setAccessToken(null);
+  sessionExpiredListeners.forEach((listener) => {
+    try {
+      listener();
+    } catch {
+      // Ignore listener error
+    }
+  });
 }
 
 export class FetchError extends Error {
@@ -26,7 +47,11 @@ export class FetchError extends Error {
   }
 }
 
-async function refreshAccessToken(): Promise<string | null> {
+/**
+ * Single-flight token refresher. All callers (client interceptor or AuthContext)
+ * share this single execution so rotating refresh tokens are never double-consumed.
+ */
+export async function performTokenRefresh(): Promise<AuthResponse | null> {
   if (refreshPromise) return refreshPromise;
 
   refreshPromise = (async () => {
@@ -38,18 +63,20 @@ async function refreshAccessToken(): Promise<string | null> {
       });
 
       if (!res.ok) {
-        setAccessToken(null);
+        notifySessionExpired();
         return null;
       }
 
-      const data = await res.json();
-      if (data.access_token) {
+      const data: AuthResponse = await res.json();
+      if (data && data.access_token) {
         setAccessToken(data.access_token);
-        return data.access_token;
+        return data;
       }
+
+      notifySessionExpired();
       return null;
     } catch {
-      setAccessToken(null);
+      notifySessionExpired();
       return null;
     } finally {
       refreshPromise = null;
@@ -80,10 +107,11 @@ export async function apiClient<T>(
     headers,
   });
 
+  // Automatically refresh and retry once on 401 for non-auth endpoints
   if (response.status === 401 && !endpoint.includes("/auth/")) {
-    const newToken = await refreshAccessToken();
-    if (newToken) {
-      headers.set("Authorization", `Bearer ${newToken}`);
+    const refreshed = await performTokenRefresh();
+    if (refreshed && refreshed.access_token) {
+      headers.set("Authorization", `Bearer ${refreshed.access_token}`);
       const retryResponse = await fetch(url, {
         ...options,
         credentials: "include",
@@ -94,12 +122,21 @@ export async function apiClient<T>(
         const errorData = await retryResponse.json().catch(() => null);
         throw new FetchError(
           retryResponse.status,
-          errorData?.message || errorData?.error || `Request failed with status ${retryResponse.status}`,
+          errorData?.message ||
+            errorData?.error ||
+            `Request failed with status ${retryResponse.status}`,
           errorData
         );
       }
 
+      if (retryResponse.status === 204) {
+        return {} as T;
+      }
+
       return retryResponse.json();
+    } else {
+      // Refresh failed (token expired or revoked)
+      notifySessionExpired();
     }
   }
 

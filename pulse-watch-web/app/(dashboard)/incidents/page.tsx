@@ -16,6 +16,7 @@ import {
   ShieldCheck,
   CheckCircle2,
   Clock,
+  Info,
 } from "lucide-react";
 
 export default function IncidentsPage() {
@@ -23,42 +24,69 @@ export default function IncidentsPage() {
   const [monitors, setMonitors] = useState<Monitor[]>([]);
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [failedMonitorsCount, setFailedMonitorsCount] = useState(0);
+  const [isTruncated, setIsTruncated] = useState(false);
 
   const fetchIncidents = useCallback(async () => {
     try {
       setLoading(true);
+      setError(null);
+      setFailedMonitorsCount(0);
+      setIsTruncated(false);
+
       const monitorsRes = await monitorsApi.listMonitors({ limit: 100 });
       const monitorList = monitorsRes.data || [];
       setMonitors(monitorList);
+
+      if (monitorsRes.total > monitorList.length) {
+        setIsTruncated(true);
+      }
 
       if (monitorList.length === 0) {
         setIncidents([]);
         return;
       }
 
-      // Fetch incidents for all monitors concurrently
-      const incidentPromises = monitorList.map(async (m) => {
-        try {
-          const res = await monitorsApi.getIncidents(m.id, { limit: 50 });
-          return (res.data || []).map((inc) => ({
-            ...inc,
-            monitor_name: m.name,
-          }));
-        } catch {
-          return [];
-        }
-      });
+      // Batch requests with bounded concurrency (5 at a time) to avoid request flooding
+      const batchSize = 5;
+      const combinedIncidents: Incident[] = [];
+      let failedCount = 0;
 
-      const results = await Promise.all(incidentPromises);
-      const combined = results.flat();
+      for (let i = 0; i < monitorList.length; i += batchSize) {
+        const batch = monitorList.slice(i, i + batchSize);
+        const batchResults = await Promise.allSettled(
+          batch.map(async (m) => {
+            const res = await monitorsApi.getIncidents(m.id, { limit: 50 });
+            return (res.data || []).map((inc) => ({
+              ...inc,
+              monitor_name: m.name,
+            }));
+          })
+        );
+
+        batchResults.forEach((result) => {
+          if (result.status === "fulfilled") {
+            combinedIncidents.push(...result.value);
+          } else {
+            failedCount++;
+          }
+        });
+      }
+
+      setFailedMonitorsCount(failedCount);
 
       // Sort descending by started_at
-      combined.sort(
-        (a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
+      combinedIncidents.sort(
+        (a, b) =>
+          new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
       );
 
-      setIncidents(combined);
-    } catch {
+      setIncidents(combinedIncidents);
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error ? err.message : "Failed to load incident history."
+      );
       setIncidents([]);
     } finally {
       setLoading(false);
@@ -101,13 +129,57 @@ export default function IncidentsPage() {
       }
     >
       <div className="flex flex-col gap-4">
+        {/* Error Banner */}
+        {error && (
+          <div className="p-4 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+              <div>
+                <p className="text-xs font-semibold text-rose-800 dark:text-rose-300">
+                  Failed to load incident data
+                </p>
+                <p className="text-[11px] text-rose-600 dark:text-rose-400 mt-0.5">
+                  {error}
+                </p>
+              </div>
+            </div>
+            <Button variant="secondary" size="sm" onClick={fetchIncidents}>
+              <RefreshCw className="w-3.5 h-3.5 mr-1" />
+              Retry
+            </Button>
+          </div>
+        )}
+
+        {/* Truncation or Partial Failure Warnings */}
+        {failedMonitorsCount > 0 && !error && (
+          <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+            <span>
+              Could not retrieve incidents for {failedMonitorsCount} monitor
+              {failedMonitorsCount > 1 ? "s" : ""}. Some historical incidents may
+              be omitted.
+            </span>
+          </div>
+        )}
+
+        {isTruncated && !error && (
+          <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/50 text-xs text-blue-800 dark:text-blue-300 flex items-center gap-2">
+            <Info className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+            <span>
+              Showing incident history across your first 100 monitors.
+            </span>
+          </div>
+        )}
+
         {/* Metric summary pills */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="bg-white dark:bg-[#0a0e1a] border border-neutral-200 dark:border-neutral-800/80 rounded-xl p-3.5 shadow-2xs flex items-center justify-between">
             <div>
-              <p className="text-[11px] font-semibold text-neutral-500">Total Incidents</p>
+              <p className="text-[11px] font-semibold text-neutral-500">
+                Total Incidents
+              </p>
               <p className="text-xl font-bold font-mono text-neutral-900 dark:text-white mt-0.5">
-                {incidents.length}
+                {error ? "—" : incidents.length}
               </p>
             </div>
             <div className="w-8 h-8 rounded-lg bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center text-neutral-600 dark:text-neutral-300">
@@ -117,9 +189,11 @@ export default function IncidentsPage() {
 
           <div className="bg-white dark:bg-[#0a0e1a] border border-neutral-200 dark:border-neutral-800/80 rounded-xl p-3.5 shadow-2xs flex items-center justify-between">
             <div>
-              <p className="text-[11px] font-semibold text-neutral-500">Active Outages</p>
+              <p className="text-[11px] font-semibold text-neutral-500">
+                Active Outages
+              </p>
               <p className="text-xl font-bold font-mono text-rose-600 dark:text-rose-400 mt-0.5">
-                {openCount}
+                {error ? "—" : openCount}
               </p>
             </div>
             <div className="w-8 h-8 rounded-lg bg-rose-50 dark:bg-rose-950/40 flex items-center justify-center text-rose-600 dark:text-rose-400">
@@ -129,9 +203,11 @@ export default function IncidentsPage() {
 
           <div className="bg-white dark:bg-[#0a0e1a] border border-neutral-200 dark:border-neutral-800/80 rounded-xl p-3.5 shadow-2xs flex items-center justify-between">
             <div>
-              <p className="text-[11px] font-semibold text-neutral-500">Resolved Incidents</p>
+              <p className="text-[11px] font-semibold text-neutral-500">
+                Resolved Incidents
+              </p>
               <p className="text-xl font-bold font-mono text-emerald-600 dark:text-emerald-400 mt-0.5">
-                {resolvedCount}
+                {error ? "—" : resolvedCount}
               </p>
             </div>
             <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
@@ -164,7 +240,11 @@ export default function IncidentsPage() {
 
         {/* Incidents Table */}
         <div className="bg-white dark:bg-[#0a0e1a] border border-neutral-200 dark:border-neutral-800/80 rounded-xl shadow-2xs overflow-hidden">
-          {filteredIncidents.length === 0 && !loading ? (
+          {error ? (
+            <div className="py-12 text-center text-xs text-neutral-500">
+              Could not display incident history due to a server error.
+            </div>
+          ) : filteredIncidents.length === 0 && !loading ? (
             <div className="py-12">
               <EmptyState
                 icon={ShieldCheck}
@@ -174,7 +254,7 @@ export default function IncidentsPage() {
                     ? "No incidents match your selected filter."
                     : monitors.length === 0
                     ? "No monitors configured yet. Add monitors to start outage tracking."
-                    : "All configured monitors are currently healthy and operational."
+                    : "All queried monitors have zero detected incidents."
                 }
               />
             </div>
@@ -210,7 +290,8 @@ export default function IncidentsPage() {
                         </Link>
                       </td>
                       <td className="py-3 px-3.5 text-neutral-700 dark:text-neutral-300">
-                        {inc.cause_summary || "Automated threshold failure detected"}
+                        {inc.cause_summary ||
+                          "Automated threshold failure detected"}
                       </td>
                       <td className="py-3 px-3.5 font-mono text-[11px] text-neutral-500 whitespace-nowrap">
                         {new Date(inc.started_at).toLocaleString()}

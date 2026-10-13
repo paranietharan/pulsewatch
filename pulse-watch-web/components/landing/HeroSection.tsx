@@ -1,4 +1,5 @@
 import React from "react";
+import Link from "next/link";
 import { ArrowRightIcon, CodeBracketIcon } from "@/components/icons";
 import { HERO_METRICS } from "@/lib/constants/landing-data";
 
@@ -25,13 +26,13 @@ export function HeroSection() {
         </p>
 
         <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mt-7">
-          <a
-            href="#pricing"
+          <Link
+            href="/signup"
             className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-100 transition-all text-xs w-full sm:w-auto shadow-sm"
           >
             <span>Start Free Trial</span>
             <ArrowRightIcon className="w-3.5 h-3.5" />
-          </a>
+          </Link>
 
           <a
             href="#features"

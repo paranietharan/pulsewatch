@@ -1,4 +1,4 @@
-import { apiClient, setAccessToken } from "./client";
+import { apiClient, setAccessToken, performTokenRefresh } from "./client";
 import {
   AuthResponse,
   SignupResponse,
@@ -30,12 +30,8 @@ export async function signup(payload: {
   });
 }
 
-export async function refresh(): Promise<AuthResponse> {
-  const res = await apiClient<AuthResponse>("/api/v1/auth/refresh", {
-    method: "POST",
-  });
-  setAccessToken(res.access_token);
-  return res;
+export async function refresh(): Promise<AuthResponse | null> {
+  return performTokenRefresh();
 }
 
 export async function logout(): Promise<MessageResponse> {

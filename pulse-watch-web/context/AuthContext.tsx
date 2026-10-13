@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { SafeUser } from "@/types/api";
 import * as authApi from "@/lib/api/auth";
-import { setAccessToken } from "@/lib/api/client";
+import { setAccessToken, performTokenRefresh, onSessionExpired } from "@/lib/api/client";
 
 interface AuthContextType {
   user: SafeUser | null;
@@ -23,20 +23,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Clear state when session expires
+  useEffect(() => {
+    const unsubscribe = onSessionExpired(() => {
+      setToken(null);
+      setUser(null);
+    });
+    return unsubscribe;
+  }, []);
+
   const refreshSession = useCallback(async (): Promise<boolean> => {
     try {
-      const res = await authApi.refresh();
+      const res = await performTokenRefresh();
       if (res && res.access_token && res.user) {
         setToken(res.access_token);
         setUser(res.user);
-        setAccessToken(res.access_token);
         return true;
       }
+      setToken(null);
+      setUser(null);
       return false;
     } catch {
       setToken(null);
       setUser(null);
-      setAccessToken(null);
       return false;
     }
   }, []);

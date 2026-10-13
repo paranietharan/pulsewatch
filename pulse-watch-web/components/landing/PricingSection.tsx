@@ -1,4 +1,5 @@
 import React from "react";
+import Link from "next/link";
 import { PRICING_PLANS } from "@/lib/constants/landing-data";
 import { CheckIcon } from "@/components/icons";
 import { SectionHeader } from "@/components/ui/SectionHeader";
@@ -43,12 +44,12 @@ export function PricingSection() {
                     </ul>
                   </div>
 
-                  <a
-                    href="#cta"
+                  <Link
+                    href="/signup"
                     className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl font-semibold text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-100 transition-all text-xs w-full mt-6 shadow-sm"
                   >
                     {plan.ctaText}
-                  </a>
+                  </Link>
                 </div>
               );
             }
@@ -76,12 +77,12 @@ export function PricingSection() {
                   </ul>
                 </div>
 
-                <a
-                  href="#cta"
+                <Link
+                  href="/signup"
                   className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl font-medium text-neutral-700 dark:text-neutral-300 bg-neutral-100/80 hover:bg-neutral-200/70 dark:bg-neutral-900/60 dark:hover:bg-neutral-800 border border-neutral-200 dark:border-neutral-800 transition-all text-xs w-full mt-6"
                 >
                   {plan.ctaText}
-                </a>
+                </Link>
               </div>
             );
           })}

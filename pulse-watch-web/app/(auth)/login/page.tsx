@@ -92,7 +92,10 @@ export default function LoginPage() {
 
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs font-medium text-neutral-700 dark:text-neutral-300">
+                <label
+                  htmlFor="password"
+                  className="text-xs font-medium text-neutral-700 dark:text-neutral-300"
+                >
                   Password
                 </label>
                 <Link
@@ -103,10 +106,13 @@ export default function LoginPage() {
                 </Link>
               </div>
               <Input
+                id="password"
+                name="password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
+                autoComplete="current-password"
                 required
               />
             </div>

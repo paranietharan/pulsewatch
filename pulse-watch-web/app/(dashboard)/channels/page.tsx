@@ -18,11 +18,13 @@ import {
   RefreshCw,
   KeyRound,
   ShieldAlert,
+  AlertTriangle,
 } from "lucide-react";
 
 export default function AlertChannelsPage() {
   const [channels, setChannels] = useState<AlertChannel[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // Modals state
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -40,10 +42,13 @@ export default function AlertChannelsPage() {
   const fetchChannels = useCallback(async () => {
     try {
       setLoading(true);
+      setError(null);
       const data = await channelsApi.listAlertChannels();
       setChannels(data || []);
-    } catch {
-      setChannels([]);
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error ? err.message : "Failed to load alert channels."
+      );
     } finally {
       setLoading(false);
     }
@@ -146,6 +151,27 @@ export default function AlertChannelsPage() {
       }
     >
       <div className="flex flex-col gap-4">
+        {/* Error Banner */}
+        {error && (
+          <div className="p-4 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+              <div>
+                <p className="text-xs font-semibold text-rose-800 dark:text-rose-300">
+                  Failed to load notification channels
+                </p>
+                <p className="text-[11px] text-rose-600 dark:text-rose-400 mt-0.5">
+                  {error}
+                </p>
+              </div>
+            </div>
+            <Button variant="secondary" size="sm" onClick={fetchChannels}>
+              <RefreshCw className="w-3.5 h-3.5 mr-1" />
+              Retry
+            </Button>
+          </div>
+        )}
+
         {/* Notice on Notification Service */}
         <div className="p-3.5 rounded-xl bg-neutral-100 dark:bg-neutral-900/60 border border-neutral-200 dark:border-neutral-800/80 flex items-start gap-3">
           <ShieldAlert className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
@@ -159,7 +185,11 @@ export default function AlertChannelsPage() {
 
         {/* Channels Grid / Table */}
         <div className="bg-white dark:bg-[#0a0e1a] border border-neutral-200 dark:border-neutral-800/80 rounded-xl shadow-2xs overflow-hidden">
-          {channels.length === 0 && !loading ? (
+          {error ? (
+            <div className="py-12 text-center text-xs text-neutral-500">
+              Could not display notification channels due to a server error.
+            </div>
+          ) : channels.length === 0 && !loading ? (
             <div className="py-12">
               <EmptyState
                 icon={Bell}

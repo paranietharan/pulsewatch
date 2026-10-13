@@ -20,32 +20,27 @@ function VerifyEmailContent() {
   );
   const [message, setMessage] = useState<string>("");
 
+  const verifiedRef = React.useRef(false);
+
   useEffect(() => {
-    if (!tokenParam) return;
+    if (!tokenParam || verifiedRef.current) return;
+    verifiedRef.current = true;
 
-    let isMounted = true;
-    (async () => {
-      try {
-        const res = await authApi.verifyEmail(tokenParam);
-        if (isMounted) {
-          setStatus("success");
-          setMessage(res.message || "Email address verified successfully.");
-        }
-      } catch (err: unknown) {
-        if (isMounted) {
-          setStatus("error");
-          setMessage(
-            err instanceof Error
-              ? err.message
-              : "Invalid or expired verification token."
-          );
-        }
-      }
-    })();
-
-    return () => {
-      isMounted = false;
-    };
+    setStatus("verifying");
+    authApi
+      .verifyEmail(tokenParam)
+      .then((res) => {
+        setStatus("success");
+        setMessage(res.message || "Email address verified successfully.");
+      })
+      .catch((err: unknown) => {
+        setStatus("error");
+        setMessage(
+          err instanceof Error
+            ? err.message
+            : "Invalid or expired verification token."
+        );
+      });
   }, [tokenParam]);
 
   const handleManualSubmit = async (e: React.FormEvent) => {

@@ -10,23 +10,38 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { MonitorFormModal } from "@/components/monitors/MonitorFormModal";
 import { DashboardSummary, Monitor, HttpMethod } from "@/types/api";
 import * as monitorsApi from "@/lib/api/monitors";
-import { Activity, Plus, RefreshCw, ExternalLink, ArrowRight, AlertTriangle } from "lucide-react";
+import {
+  Activity,
+  Plus,
+  RefreshCw,
+  ExternalLink,
+  ArrowRight,
+  AlertTriangle,
+} from "lucide-react";
 
 export default function DashboardOverviewPage() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [recentMonitors, setRecentMonitors] = useState<Monitor[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
+      setError(null);
       const [sumData, monitorsData] = await Promise.all([
-        monitorsApi.getDashboardSummary().catch(() => null),
-        monitorsApi.listMonitors({ limit: 5 }).catch(() => ({ data: [] })),
+        monitorsApi.getDashboardSummary(),
+        monitorsApi.listMonitors({ limit: 5 }),
       ]);
       setSummary(sumData);
       setRecentMonitors(monitorsData?.data || []);
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to load dashboard data. Check backend connection."
+      );
     } finally {
       setLoading(false);
     }
@@ -78,12 +93,34 @@ export default function DashboardOverviewPage() {
       }
     >
       <div className="flex flex-col gap-5">
+        {error && (
+          <div className="p-4 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+              <div>
+                <p className="text-xs font-semibold text-rose-800 dark:text-rose-300">
+                  Failed to load dashboard telemetry
+                </p>
+                <p className="text-[11px] text-rose-600 dark:text-rose-400 mt-0.5">
+                  {error}
+                </p>
+              </div>
+            </div>
+            <Button variant="secondary" size="sm" onClick={loadData}>
+              <RefreshCw className="w-3.5 h-3.5 mr-1" />
+              Retry
+            </Button>
+          </div>
+        )}
+
         {summary && summary.active_incidents > 0 && (
           <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
               <p className="text-xs font-semibold text-rose-800 dark:text-rose-300">
-                {summary.active_incidents} active incident{summary.active_incidents > 1 ? "s" : ""} detected across your monitors.
+                {summary.active_incidents} active incident
+                {summary.active_incidents > 1 ? "s" : ""} detected across your
+                monitors.
               </p>
             </div>
             <Link
@@ -116,7 +153,11 @@ export default function DashboardOverviewPage() {
             )}
           </div>
 
-          {recentMonitors.length === 0 && !loading ? (
+          {error ? (
+            <div className="py-8 text-center text-xs text-neutral-500">
+              Could not load recent monitors due to an API error.
+            </div>
+          ) : recentMonitors.length === 0 && !loading ? (
             <EmptyState
               icon={Activity}
               title="No monitors found"
@@ -156,7 +197,10 @@ export default function DashboardOverviewPage() {
                         <Badge status={m.is_active ? m.status : "PAUSED"} />
                       </td>
                       <td className="py-2.5 px-3 font-semibold text-neutral-900 dark:text-white whitespace-nowrap">
-                        <Link href={`/monitors/${m.id}`} className="hover:underline">
+                        <Link
+                          href={`/monitors/${m.id}`}
+                          className="hover:underline"
+                        >
                           {m.name}
                         </Link>
                       </td>
@@ -167,7 +211,9 @@ export default function DashboardOverviewPage() {
                         {m.url}
                       </td>
                       <td className="py-2.5 px-3 font-mono text-neutral-800 dark:text-neutral-200">
-                        {m.avg_response_time_ms ? `${m.avg_response_time_ms}ms` : "—"}
+                        {m.avg_response_time_ms
+                          ? `${m.avg_response_time_ms}ms`
+                          : "—"}
                       </td>
                       <td className="py-2.5 px-3 text-neutral-500 font-mono text-[11px]">
                         {m.interval_seconds}s

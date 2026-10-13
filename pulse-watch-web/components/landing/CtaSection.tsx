@@ -1,4 +1,5 @@
 import React from "react";
+import Link from "next/link";
 
 export function CtaSection() {
   return (
@@ -12,20 +13,18 @@ export function CtaSection() {
             Launch PulseWatch in under 60 seconds with Docker Compose. Zero proprietary lock-in.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mt-6">
-            <a
-              href="#pricing"
+            <Link
+              href="/signup"
               className="inline-flex items-center justify-center px-5 py-2.5 rounded-xl font-semibold text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-100 transition-all text-xs shadow-sm"
             >
               Get Started Now
-            </a>
-            <a
-              href="http://localhost:8080/health"
-              target="_blank"
-              rel="noreferrer"
+            </Link>
+            <Link
+              href="/login"
               className="inline-flex items-center justify-center px-4 py-2.5 rounded-xl font-medium text-neutral-700 dark:text-neutral-300 bg-white hover:bg-neutral-100 dark:bg-neutral-900/60 dark:hover:bg-neutral-800 border border-neutral-200 dark:border-neutral-800 transition-all text-xs"
             >
-              Inspect API Health
-            </a>
+              Sign In to Cockpit
+            </Link>
           </div>
         </div>
       </div>

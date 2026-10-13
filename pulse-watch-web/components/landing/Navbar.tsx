@@ -22,37 +22,36 @@ export function Navbar() {
         </Link>
 
         <nav className="hidden md:flex items-center gap-7 text-xs font-medium text-neutral-600 dark:text-neutral-400">
-          <a href="#features" className="hover:text-neutral-900 dark:hover:text-white transition-colors">
+          <a
+            href="#features"
+            className="hover:text-neutral-900 dark:hover:text-white transition-colors"
+          >
             Features
           </a>
-          <a href="#pricing" className="hover:text-neutral-900 dark:hover:text-white transition-colors">
+          <a
+            href="#pricing"
+            className="hover:text-neutral-900 dark:hover:text-white transition-colors"
+          >
             Pricing
           </a>
         </nav>
 
-        <div className="flex items-center gap-2.5">
-          <div className="hidden lg:flex items-center gap-2 px-2.5 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-500/20 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
-            <span className="radar-beacon" />
-            <span>14 Nodes Active</span>
-          </div>
-
-          <a
-            href="http://localhost:8080/health"
-            target="_blank"
-            rel="noreferrer"
-            className="text-xs font-medium text-neutral-600 hover:text-neutral-950 dark:text-neutral-400 dark:hover:text-white px-2 py-1 transition-colors hidden sm:block"
+        <div className="flex items-center gap-3">
+          <Link
+            href="/login"
+            className="text-xs font-medium text-neutral-600 hover:text-neutral-950 dark:text-neutral-400 dark:hover:text-white px-2 py-1 transition-colors"
           >
-            API Status
-          </a>
+            Sign In
+          </Link>
 
           <ThemeToggle />
 
-          <a
-            href="#pricing"
+          <Link
+            href="/signup"
             className="inline-flex items-center justify-center px-3.5 py-1.5 rounded-lg font-semibold text-xs text-white bg-neutral-900 hover:bg-neutral-800 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-100 transition-colors shadow-sm"
           >
             Start Monitoring
-          </a>
+          </Link>
         </div>
       </div>
     </header>

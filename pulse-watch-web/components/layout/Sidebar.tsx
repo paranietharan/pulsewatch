@@ -11,7 +11,6 @@ import {
   Settings,
   LogOut,
   X,
-  ExternalLink,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { PulseLogoIcon } from "@/components/icons";
@@ -114,19 +113,6 @@ export function Sidebar({
               <LogOut className="w-3.5 h-3.5" />
             </button>
           </div>
-
-          <a
-            href="http://localhost:8080/health"
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center justify-between px-2.5 py-1 text-[11px] text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-300 transition-colors"
-          >
-            <span className="flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-              API Service
-            </span>
-            <ExternalLink className="w-3 h-3 text-neutral-400" />
-          </a>
         </div>
       </aside>
     </>

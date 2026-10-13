@@ -23,6 +23,8 @@ import {
   ExternalLink,
   ChevronLeft,
   ChevronRight,
+  AlertTriangle,
+  X,
 } from "lucide-react";
 
 export default function MonitorsPage() {
@@ -35,6 +37,8 @@ export default function MonitorsPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Modals state
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -45,16 +49,28 @@ export default function MonitorsPage() {
   const fetchMonitors = useCallback(async () => {
     try {
       setLoading(true);
+      setError(null);
       const res: PaginatedResponse<Monitor> = await monitorsApi.listMonitors({
         page,
         limit,
         status: statusFilter === "ALL" ? undefined : statusFilter,
       });
+
+      // Clamp out-of-range page if records were deleted
+      if (res.total_pages > 0 && page > res.total_pages) {
+        setPage(res.total_pages);
+        return;
+      }
+
       setMonitors(res.data || []);
       setTotal(res.total || 0);
       setTotalPages(res.total_pages || 1);
-    } catch {
-      setMonitors([]);
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to load monitors. Please check your network connection."
+      );
     } finally {
       setLoading(false);
     }
@@ -99,6 +115,7 @@ export default function MonitorsPage() {
 
   const handleToggleActive = async (monitor: Monitor) => {
     setActionLoadingId(monitor.id);
+    setActionError(null);
     try {
       if (monitor.is_active) {
         await monitorsApi.disableMonitor(monitor.id);
@@ -106,6 +123,12 @@ export default function MonitorsPage() {
         await monitorsApi.enableMonitor(monitor.id);
       }
       await fetchMonitors();
+    } catch (err: unknown) {
+      setActionError(
+        err instanceof Error
+          ? err.message
+          : `Failed to ${monitor.is_active ? "pause" : "resume"} monitor.`
+      );
     } finally {
       setActionLoadingId(null);
     }
@@ -113,14 +136,27 @@ export default function MonitorsPage() {
 
   const handleDelete = async () => {
     if (!deletingMonitor) return;
-    await monitorsApi.deleteMonitor(deletingMonitor.id);
-    setDeletingMonitor(null);
-    await fetchMonitors();
+    setActionError(null);
+    try {
+      await monitorsApi.deleteMonitor(deletingMonitor.id);
+      setDeletingMonitor(null);
+      // If we deleted the only item on the current page, step back one page
+      if (monitors.length === 1 && page > 1) {
+        setPage(page - 1);
+      } else {
+        await fetchMonitors();
+      }
+    } catch (err: unknown) {
+      setActionError(
+        err instanceof Error ? err.message : "Failed to delete monitor."
+      );
+    }
   };
 
-  // Client-side search filtering by name or URL
+  // Client-side filtering applies to the current page
+  const isFiltering = search.trim().length > 0;
   const filteredMonitors = monitors.filter((m) => {
-    if (!search.trim()) return true;
+    if (!isFiltering) return true;
     const q = search.toLowerCase();
     return m.name.toLowerCase().includes(q) || m.url.toLowerCase().includes(q);
   });
@@ -128,7 +164,7 @@ export default function MonitorsPage() {
   return (
     <DashboardLayout
       title="Monitors"
-      description={`Manage and configure ${total} active and paused uptime probes`}
+      description={`Manage and configure ${total} uptime probes`}
       action={
         <div className="flex items-center gap-2">
           <Button
@@ -151,17 +187,61 @@ export default function MonitorsPage() {
       }
     >
       <div className="flex flex-col gap-4">
+        {/* Error Banners */}
+        {error && (
+          <div className="p-4 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+              <div>
+                <p className="text-xs font-semibold text-rose-800 dark:text-rose-300">
+                  Failed to load monitors
+                </p>
+                <p className="text-[11px] text-rose-600 dark:text-rose-400 mt-0.5">
+                  {error}
+                </p>
+              </div>
+            </div>
+            <Button variant="secondary" size="sm" onClick={fetchMonitors}>
+              <RefreshCw className="w-3.5 h-3.5 mr-1" />
+              Retry
+            </Button>
+          </div>
+        )}
+
+        {actionError && (
+          <div className="p-3 rounded-lg bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 flex items-center justify-between text-xs text-rose-700 dark:text-rose-400">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              <span>{actionError}</span>
+            </div>
+            <button
+              onClick={() => setActionError(null)}
+              className="text-rose-500 hover:text-rose-800 dark:hover:text-rose-200"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
         {/* Filters bar */}
         <div className="bg-white dark:bg-[#0a0e1a] border border-neutral-200 dark:border-neutral-800/80 rounded-xl p-3 shadow-2xs flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="relative w-full sm:w-72">
+          <div className="relative w-full sm:w-80">
             <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Search by name or URL..."
+              placeholder="Filter this page by name or URL..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#07090e] text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              className="w-full pl-9 pr-8 py-1.5 text-xs rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-[#07090e] text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
             />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
 
           <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
@@ -185,16 +265,43 @@ export default function MonitorsPage() {
           </div>
         </div>
 
+        {/* Filter Indicator */}
+        {isFiltering && (
+          <div className="text-[11px] text-neutral-500 flex items-center justify-between px-1">
+            <span>
+              Showing {filteredMonitors.length} matching monitors on page {page}
+            </span>
+            <button
+              onClick={() => setSearch("")}
+              className="text-emerald-600 dark:text-emerald-400 hover:underline"
+            >
+              Clear page filter
+            </button>
+          </div>
+        )}
+
         {/* Monitors List */}
         <div className="bg-white dark:bg-[#0a0e1a] border border-neutral-200 dark:border-neutral-800/80 rounded-xl shadow-2xs overflow-hidden">
-          {filteredMonitors.length === 0 && !loading ? (
+          {error ? (
+            <div className="py-12 text-center text-xs text-neutral-500">
+              Could not display monitors due to a server error.
+            </div>
+          ) : filteredMonitors.length === 0 && !loading ? (
             <div className="py-12">
               <EmptyState
                 icon={Activity}
-                title="No monitors found"
+                title={
+                  isFiltering
+                    ? "No matches on this page"
+                    : statusFilter !== "ALL"
+                    ? "No monitors match status"
+                    : "No monitors found"
+                }
                 description={
-                  search || statusFilter !== "ALL"
-                    ? "No monitors match your current search or status filters."
+                  isFiltering
+                    ? "No monitors on the current page match your search term. Clear the search or check other pages."
+                    : statusFilter !== "ALL"
+                    ? `No monitors found with status "${statusFilter}".`
                     : "You haven't created any uptime monitors yet."
                 }
                 action={
@@ -202,16 +309,19 @@ export default function MonitorsPage() {
                     variant="primary"
                     size="sm"
                     onClick={() => {
-                      if (search || statusFilter !== "ALL") {
+                      if (isFiltering) {
                         setSearch("");
+                      } else if (statusFilter !== "ALL") {
                         setStatusFilter("ALL");
                       } else {
                         setCreateModalOpen(true);
                       }
                     }}
                   >
-                    {search || statusFilter !== "ALL"
-                      ? "Clear Filters"
+                    {isFiltering
+                      ? "Clear Search"
+                      : statusFilter !== "ALL"
+                      ? "Show All Statuses"
                       : "Create First Monitor"}
                   </Button>
                 }
@@ -277,8 +387,10 @@ export default function MonitorsPage() {
                             <button
                               onClick={() => handleToggleActive(m)}
                               disabled={isActionBusy}
-                              title={isPaused ? "Resume probing" : "Pause probing"}
-                              className={`p-1.5 rounded-md text-xs transition-colors ${
+                              title={
+                                isPaused ? "Resume probing" : "Pause probing"
+                              }
+                              className={`p-1.5 rounded-md text-xs transition-colors cursor-pointer ${
                                 isPaused
                                   ? "text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
                                   : "text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-800 dark:hover:text-neutral-200"
@@ -294,7 +406,7 @@ export default function MonitorsPage() {
                             <button
                               onClick={() => setEditingMonitor(m)}
                               title="Edit monitor configuration"
-                              className="p-1.5 rounded-md text-xs text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-800 dark:hover:text-neutral-200 transition-colors"
+                              className="p-1.5 rounded-md text-xs text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-800 dark:hover:text-neutral-200 transition-colors cursor-pointer"
                             >
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
@@ -302,7 +414,7 @@ export default function MonitorsPage() {
                             <button
                               onClick={() => setDeletingMonitor(m)}
                               title="Delete monitor"
-                              className="p-1.5 rounded-md text-xs text-neutral-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
+                              className="p-1.5 rounded-md text-xs text-neutral-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 hover:text-rose-600 dark:hover:text-rose-400 transition-colors cursor-pointer"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -316,8 +428,8 @@ export default function MonitorsPage() {
             </div>
           )}
 
-          {/* Pagination bar */}
-          {totalPages > 1 && (
+          {/* Pagination bar (only shown when not searching within page) */}
+          {totalPages > 1 && !isFiltering && !error && (
             <div className="p-3 border-t border-neutral-100 dark:border-neutral-800 flex items-center justify-between text-xs text-neutral-500">
               <span>
                 Page {page} of {totalPages} ({total} total monitors)
