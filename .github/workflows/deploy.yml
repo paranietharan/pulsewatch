@@ -38,7 +38,7 @@ permissions:
   id-token: write
 
 env:
-  AWS_REGION: us-east-1
+  AWS_REGION: ap-south-1
   EKS_CLUSTER_NAME: pulsewatch-eks
 
 jobs:
