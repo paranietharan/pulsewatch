@@ -335,6 +335,9 @@ jobs:
               --set "database.dbName=${DB_NAME}"
               --set "database.sslmode=require"
             )
+            if [ -n "${{ secrets.DB_PASSWORD || secrets.RDS_PASSWORD }}" ]; then
+              SET_ARGS+=(--set "database.password=${{ secrets.DB_PASSWORD || secrets.RDS_PASSWORD }}")
+            fi
             echo "Successfully discovered and injected RDS database endpoint (${RDS_ENDPOINT})"
           fi
 
