@@ -335,10 +335,24 @@ jobs:
               --set "database.dbName=${DB_NAME}"
               --set "database.sslmode=require"
             )
-            if [ -n "${{ secrets.DB_PASSWORD || secrets.RDS_PASSWORD }}" ]; then
-              SET_ARGS+=(--set "database.password=${{ secrets.DB_PASSWORD || secrets.RDS_PASSWORD }}")
-            fi
             echo "Successfully discovered and injected RDS database endpoint (${RDS_ENDPOINT})"
+
+            # Automatically fetch DB credentials from AWS Secrets Manager
+            DB_SECRET_RAW=$(aws secretsmanager get-secret-value \
+              --secret-id "pulsewatch-eks-rds-credentials" \
+              --region ${{ env.AWS_REGION }} \
+              --query "SecretString" --output text 2>/dev/null || echo "")
+
+            if [ -n "$DB_SECRET_RAW" ] && [ "$DB_SECRET_RAW" != "None" ]; then
+              RESOLVED_DB_PASS=$(echo "$DB_SECRET_RAW" | jq -r '.password // empty')
+              if [ -n "$RESOLVED_DB_PASS" ]; then
+                SET_ARGS+=(--set "database.password=${RESOLVED_DB_PASS}")
+                echo "Successfully retrieved and injected DB password from AWS Secrets Manager."
+              fi
+            elif [ -n "${{ secrets.DB_PASSWORD || secrets.RDS_PASSWORD }}" ]; then
+              SET_ARGS+=(--set "database.password=${{ secrets.DB_PASSWORD || secrets.RDS_PASSWORD }}")
+              echo "Injected DB password from GitHub Secrets fallback."
+            fi
           fi
 
           helm upgrade --install "$RELEASE_NAME" ./pulsewatch-infra/helm/pulsewatch \
