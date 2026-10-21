@@ -28,10 +28,6 @@ on:
         options:
           - staging
           - prod
-      image_tag:
-        description: "Custom image tag (optional, defaults to Git short SHA + run number)"
-        required: false
-        default: ""
 
 permissions:
   contents: write
@@ -78,12 +74,8 @@ jobs:
             SERVICES='["${{ inputs.service }}"]'
           fi
 
-          if [ -n "${{ inputs.image_tag }}" ]; then
-            IMAGE_TAG="${{ inputs.image_tag }}"
-          else
-            SHORT_SHA=$(git rev-parse --short HEAD)
-            IMAGE_TAG="${SHORT_SHA}-${{ github.run_number }}"
-          fi
+          # Use Git commit ID directly as the image tag
+          IMAGE_TAG=$(git rev-parse --short HEAD 2>/dev/null || echo "${GITHUB_SHA:0:7}")
 
           echo "environment=$RAW_ENV"   >> "$GITHUB_OUTPUT"
           echo "deploy_env=$DEPLOY_ENV" >> "$GITHUB_OUTPUT"
