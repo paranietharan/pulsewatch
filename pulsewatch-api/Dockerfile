@@ -16,9 +16,13 @@ FROM alpine:3.21
 
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates tzdata curl
+RUN apk add --no-cache ca-certificates tzdata curl && \
+    addgroup -S -g 10001 appgroup && \
+    adduser -S -u 10001 -G appgroup appuser
 
 COPY --from=builder /app/bin/pulsewatch-api /app/pulsewatch-api
+
+USER 10001:10001
 
 EXPOSE 8080
 

@@ -44,7 +44,7 @@ COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
 
-USER nextjs
+USER 1001:1001
 
 EXPOSE 3000
 
