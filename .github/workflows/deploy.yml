@@ -325,6 +325,27 @@ jobs:
             esac
           done
 
+          # Auto-discover RDS endpoint if provisioned
+          RDS_ENDPOINT=$(aws rds describe-db-instances \
+            --db-instance-identifier pulsewatch-eks-postgres \
+            --region ${{ env.AWS_REGION }} \
+            --query "DBInstances[0].Endpoint.Address" --output text 2>/dev/null || echo "")
+
+          if [ -n "$RDS_ENDPOINT" ] && [ "$RDS_ENDPOINT" != "None" ]; then
+            if [ "$ENV_SHORT" = "prod" ]; then
+              DB_NAME="pulsewatch"
+            else
+              DB_NAME="pulsewatch_staging"
+            fi
+
+            SET_ARGS+=(
+              --set "database.host=${RDS_ENDPOINT}"
+              --set "database.dbName=${DB_NAME}"
+              --set "database.sslmode=require"
+            )
+            echo "Successfully discovered and injected RDS database endpoint (${RDS_ENDPOINT})"
+          fi
+
           helm upgrade --install "$RELEASE_NAME" ./pulsewatch-infra/helm/pulsewatch \
             --namespace "${NAMESPACE}" \
             --create-namespace \
