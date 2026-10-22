@@ -3,7 +3,10 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"pulsewatch-api/internal/config"
@@ -40,10 +43,11 @@ func (h *AuthHandler) Signup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user, err := h.authService.Signup(r.Context(), service.SignupParams{
-		FirstName: req.FirstName,
-		LastName:  req.LastName,
-		Email:     req.Email,
-		Password:  req.Password,
+		FirstName:   req.FirstName,
+		LastName:    req.LastName,
+		Email:       req.Email,
+		Password:    req.Password,
+		FrontendURL: getRequestBaseURL(r),
 	})
 	if err != nil {
 		if errors.Is(err, repository.ErrUserAlreadyExists) {
@@ -182,7 +186,7 @@ func (h *AuthHandler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = h.authService.ForgotPassword(r.Context(), req.Email)
+	_ = h.authService.ForgotPassword(r.Context(), req.Email, getRequestBaseURL(r))
 
 	// Return generic message to prevent account enumeration
 	JSONMessage(w, http.StatusOK, "If an account exists with that email address, password reset instructions have been sent.")
@@ -254,10 +258,39 @@ func (h *AuthHandler) ResendVerification(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	_ = h.authService.ResendVerification(r.Context(), req.Email)
+	_ = h.authService.ResendVerification(r.Context(), req.Email, getRequestBaseURL(r))
 
 	// Generic response preventing enumeration
 	JSONMessage(w, http.StatusOK, "If an unverified account exists with that email address, a new verification link has been sent.")
+}
+
+func getRequestBaseURL(r *http.Request) string {
+	origin := r.Header.Get("Origin")
+	if origin != "" {
+		return strings.TrimRight(origin, "/")
+	}
+	referer := r.Header.Get("Referer")
+	if referer != "" {
+		if u, err := url.Parse(referer); err == nil && u.Host != "" {
+			return fmt.Sprintf("%s://%s", u.Scheme, u.Host)
+		}
+	}
+	proto := r.Header.Get("X-Forwarded-Proto")
+	if proto == "" {
+		if r.TLS != nil {
+			proto = "https"
+		} else {
+			proto = "http"
+		}
+	}
+	host := r.Header.Get("X-Forwarded-Host")
+	if host == "" {
+		host = r.Host
+	}
+	if host != "" {
+		return fmt.Sprintf("%s://%s", proto, host)
+	}
+	return ""
 }
 
 // -----------------------------------------------------------------------------

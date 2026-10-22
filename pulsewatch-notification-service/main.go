@@ -48,14 +48,16 @@ type VerificationEmailPayload struct {
 	Name              string    `json:"name"`
 	VerificationToken string    `json:"verification_token"`
 	ExpiresAt         time.Time `json:"expires_at"`
+	FrontendURL       string    `json:"frontend_url,omitempty"`
 }
 
 type PasswordResetEmailPayload struct {
-	UserID     uuid.UUID `json:"user_id"`
-	Email      string    `json:"email"`
-	Name       string    `json:"name"`
-	ResetToken string    `json:"reset_token"`
-	ExpiresAt  time.Time `json:"expires_at"`
+	UserID      uuid.UUID `json:"user_id"`
+	Email       string    `json:"email"`
+	Name        string    `json:"name"`
+	ResetToken  string    `json:"reset_token"`
+	ExpiresAt   time.Time `json:"expires_at"`
+	FrontendURL string    `json:"frontend_url,omitempty"`
 }
 
 type IncidentOpenedEmailPayload struct {
@@ -228,7 +230,12 @@ func processEmailDelivery(d amqp.Delivery, sender *notifier.EmailSender, fronten
 		}
 
 		recipient = p.Email
-		verificationLink := fmt.Sprintf("%s/verify-email?token=%s", frontendURL, p.VerificationToken)
+		baseLink := p.FrontendURL
+		if baseLink == "" {
+			baseLink = frontendURL
+		}
+		baseLink = strings.TrimRight(baseLink, "/")
+		verificationLink := fmt.Sprintf("%s/verify-email?token=%s", baseLink, p.VerificationToken)
 		subject := "Verify your PulseWatch account"
 		textBody := fmt.Sprintf("Hi %s,\n\nPlease verify your email address by visiting:\n%s\n\nThis link expires at %s.\n\nPulseWatch Team",
 			p.Name, verificationLink, p.ExpiresAt.Format(time.RFC1123))
@@ -257,7 +264,12 @@ func processEmailDelivery(d amqp.Delivery, sender *notifier.EmailSender, fronten
 		}
 
 		recipient = p.Email
-		resetLink := fmt.Sprintf("%s/reset-password?token=%s", frontendURL, p.ResetToken)
+		baseLink := p.FrontendURL
+		if baseLink == "" {
+			baseLink = frontendURL
+		}
+		baseLink = strings.TrimRight(baseLink, "/")
+		resetLink := fmt.Sprintf("%s/reset-password?token=%s", baseLink, p.ResetToken)
 		subject := "Reset your PulseWatch password"
 		textBody := fmt.Sprintf("Hi %s,\n\nA password reset was requested. Visit:\n%s\n\nExpires at: %s.\n\nPulseWatch Team",
 			p.Name, resetLink, p.ExpiresAt.Format(time.RFC1123))

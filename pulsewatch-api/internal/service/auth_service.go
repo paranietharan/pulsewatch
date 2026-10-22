@@ -34,10 +34,11 @@ type AuthResponse struct {
 
 // SignupParams holds input parameters for registration.
 type SignupParams struct {
-	FirstName string
-	LastName  string
-	Email     string
-	Password  string
+	FirstName   string
+	LastName    string
+	Email       string
+	Password    string
+	FrontendURL string
 }
 
 // AuthService handles all authentication and account security business logic.
@@ -117,6 +118,11 @@ func (s *AuthService) Signup(ctx context.Context, params SignupParams) (*models.
 			return err
 		}
 
+		frontendURL := strings.TrimRight(params.FrontendURL, "/")
+		if frontendURL == "" {
+			frontendURL = strings.TrimRight(s.cfg.FrontendURL, "/")
+		}
+
 		// Prepare Outbox Event
 		eventPayload := rabbitmq.BaseEvent{
 			EventID:       uuid.New(),
@@ -129,6 +135,7 @@ func (s *AuthService) Signup(ctx context.Context, params SignupParams) (*models.
 				Name:              createdUser.FullName(),
 				VerificationToken: rawVerifyToken,
 				ExpiresAt:         evt.ExpiresAt,
+				FrontendURL:       frontendURL,
 			},
 		}
 
@@ -315,7 +322,7 @@ func (s *AuthService) GetCurrentUser(ctx context.Context, userID uuid.UUID) (*mo
 
 // ForgotPassword generates a password reset token and queues an email via outbox.
 // Returns success without leaking whether the email exists.
-func (s *AuthService) ForgotPassword(ctx context.Context, email string) error {
+func (s *AuthService) ForgotPassword(ctx context.Context, email, callerFrontendURL string) error {
 	cleanEmail := strings.TrimSpace(strings.ToLower(email))
 	user, err := s.userRepo.GetByEmail(ctx, cleanEmail)
 	if err != nil {
@@ -338,17 +345,23 @@ func (s *AuthService) ForgotPassword(ctx context.Context, email string) error {
 		ExpiresAt: time.Now().UTC().Add(s.cfg.ResetTokenExpiry),
 	}
 
+	frontendURL := strings.TrimRight(callerFrontendURL, "/")
+	if frontendURL == "" {
+		frontendURL = strings.TrimRight(s.cfg.FrontendURL, "/")
+	}
+
 	eventPayload := rabbitmq.BaseEvent{
 		EventID:       uuid.New(),
 		EventType:     rabbitmq.RoutingKeyEmailPasswordReset,
 		SchemaVersion: "1.0",
 		OccurredAt:    time.Now().UTC(),
 		Payload: rabbitmq.PasswordResetEmailPayload{
-			UserID:     user.ID,
-			Email:      user.Email,
-			Name:       user.FullName(),
-			ResetToken: rawResetToken,
-			ExpiresAt:  prt.ExpiresAt,
+			UserID:      user.ID,
+			Email:       user.Email,
+			Name:        user.FullName(),
+			ResetToken:  rawResetToken,
+			ExpiresAt:   prt.ExpiresAt,
+			FrontendURL: frontendURL,
 		},
 	}
 
@@ -425,7 +438,7 @@ func (s *AuthService) VerifyEmail(ctx context.Context, rawToken string) error {
 }
 
 // ResendVerification generates and sends a new verification token if account is unverified.
-func (s *AuthService) ResendVerification(ctx context.Context, email string) error {
+func (s *AuthService) ResendVerification(ctx context.Context, email, callerFrontendURL string) error {
 	cleanEmail := strings.TrimSpace(strings.ToLower(email))
 	user, err := s.userRepo.GetByEmail(ctx, cleanEmail)
 	if err != nil {
@@ -448,6 +461,11 @@ func (s *AuthService) ResendVerification(ctx context.Context, email string) erro
 		ExpiresAt: time.Now().UTC().Add(s.cfg.VerifyTokenExpiry),
 	}
 
+	frontendURL := strings.TrimRight(callerFrontendURL, "/")
+	if frontendURL == "" {
+		frontendURL = strings.TrimRight(s.cfg.FrontendURL, "/")
+	}
+
 	eventPayload := rabbitmq.BaseEvent{
 		EventID:       uuid.New(),
 		EventType:     rabbitmq.RoutingKeyEmailResendVerification,
@@ -459,6 +477,7 @@ func (s *AuthService) ResendVerification(ctx context.Context, email string) erro
 			Name:              user.FullName(),
 			VerificationToken: rawVerifyToken,
 			ExpiresAt:         evt.ExpiresAt,
+			FrontendURL:       frontendURL,
 		},
 	}
 

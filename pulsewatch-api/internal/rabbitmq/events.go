@@ -40,15 +40,17 @@ type VerificationEmailPayload struct {
 	Name              string    `json:"name"`
 	VerificationToken string    `json:"verification_token"` // Raw single-use token sent ONLY to email provider
 	ExpiresAt         time.Time `json:"expires_at"`
+	FrontendURL       string    `json:"frontend_url,omitempty"`
 }
 
 // PasswordResetEmailPayload contains details for sending password reset emails.
 type PasswordResetEmailPayload struct {
-	UserID     uuid.UUID `json:"user_id"`
-	Email      string    `json:"email"`
-	Name       string    `json:"name"`
-	ResetToken string    `json:"reset_token"` // Raw single-use token sent ONLY to email provider
-	ExpiresAt  time.Time `json:"expires_at"`
+	UserID      uuid.UUID `json:"user_id"`
+	Email       string    `json:"email"`
+	Name        string    `json:"name"`
+	ResetToken  string    `json:"reset_token"` // Raw single-use token sent ONLY to email provider
+	ExpiresAt   time.Time `json:"expires_at"`
+	FrontendURL string    `json:"frontend_url,omitempty"`
 }
 
 // IncidentOpenedEmailPayload contains details for sending outage alert emails.
