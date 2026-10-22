@@ -189,6 +189,9 @@ jobs:
     needs: [resolve, build-push]
     runs-on: ubuntu-latest
     environment: ${{ needs.resolve.outputs.deploy_env }}
+    concurrency:
+      group: helm-deploy-${{ needs.resolve.outputs.namespace }}
+      cancel-in-progress: false
     steps:
       - name: Checkout Helm Charts (pulsewatch-infra)
         uses: actions/checkout@v4
