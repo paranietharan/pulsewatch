@@ -2,6 +2,7 @@ package notifier
 
 import (
 	"bytes"
+	"crypto/tls"
 	"fmt"
 	"net/smtp"
 	"os"
@@ -69,6 +70,46 @@ func (s *EmailSender) Send(to, subject, textBody, htmlBody string) error {
 		if end := strings.Index(fromAddr, ">"); end != -1 && end > start {
 			fromAddr = fromAddr[start+1 : end]
 		}
+	}
+
+	// Port 465 uses direct/implicit TLS (e.g. Resend, Gmail SSL)
+	if s.port == 465 {
+		tlsConfig := &tls.Config{
+			ServerName: s.host,
+		}
+		conn, err := tls.Dial("tcp", addr, tlsConfig)
+		if err != nil {
+			return fmt.Errorf("failed to dial SMTP over TLS: %w", err)
+		}
+		defer conn.Close()
+
+		client, err := smtp.NewClient(conn, s.host)
+		if err != nil {
+			return fmt.Errorf("failed to create SMTP client: %w", err)
+		}
+		defer client.Close()
+
+		if auth != nil {
+			if err = client.Auth(auth); err != nil {
+				return fmt.Errorf("failed to authenticate SMTP: %w", err)
+			}
+		}
+
+		if err = client.Mail(fromAddr); err != nil {
+			return fmt.Errorf("failed to set sender: %w", err)
+		}
+		if err = client.Rcpt(to); err != nil {
+			return fmt.Errorf("failed to set recipient: %w", err)
+		}
+
+		w, err := client.Data()
+		if err != nil {
+			return fmt.Errorf("failed to open data writer: %w", err)
+		}
+		if _, err = w.Write(msg.Bytes()); err != nil {
+			return fmt.Errorf("failed to write email body: %w", err)
+		}
+		return w.Close()
 	}
 
 	return smtp.SendMail(addr, auth, fromAddr, []string{to}, msg.Bytes())
