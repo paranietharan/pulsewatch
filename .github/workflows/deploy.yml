@@ -299,6 +299,26 @@ jobs:
             fi
           fi
 
+          # Inject SMTP and JWT configuration if defined in GitHub Environment/Repository Secrets
+          if [ -n "${{ secrets.SMTP_USER }}" ]; then
+            SET_ARGS+=(--set "smtp.user=${{ secrets.SMTP_USER }}")
+          fi
+          if [ -n "${{ secrets.SMTP_PASSWORD }}" ]; then
+            SET_ARGS+=(--set "smtp.password=${{ secrets.SMTP_PASSWORD }}")
+          fi
+          if [ -n "${{ secrets.SMTP_HOST }}" ]; then
+            SET_ARGS+=(--set "smtp.host=${{ secrets.SMTP_HOST }}")
+          fi
+          if [ -n "${{ secrets.SMTP_PORT }}" ]; then
+            SET_ARGS+=(--set "smtp.port=${{ secrets.SMTP_PORT }}")
+          fi
+          if [ -n "${{ secrets.SMTP_FROM }}" ]; then
+            SET_ARGS+=(--set "smtp.from=${{ secrets.SMTP_FROM }}")
+          fi
+          if [ -n "${{ secrets.JWT_SECRET }}" ]; then
+            SET_ARGS+=(--set "api.jwtSecret=${{ secrets.JWT_SECRET }}")
+          fi
+
           helm upgrade --install "$RELEASE_NAME" ./pulsewatch-infra/helm/pulsewatch \
             --namespace "${NAMESPACE}" \
             --create-namespace \
