@@ -299,22 +299,44 @@ jobs:
             fi
           fi
 
-          # Inject SMTP and JWT configuration if defined in GitHub Environment/Repository Secrets
-          if [ -n "${{ secrets.SMTP_USER }}" ]; then
-            SET_ARGS+=(--set "smtp.user=${{ secrets.SMTP_USER }}")
+          # Fetch SMTP credentials from AWS Secrets Manager if available
+          SMTP_SECRET_RAW=$(aws secretsmanager get-secret-value \
+            --secret-id "pulsewatch-${ENV_SHORT}-smtp-credentials" \
+            --region ${{ env.AWS_REGION }} \
+            --query "SecretString" --output text 2>/dev/null || echo "")
+
+          if [ -n "$SMTP_SECRET_RAW" ] && [ "$SMTP_SECRET_RAW" != "None" ]; then
+            RESOLVED_SMTP_USER=$(echo "$SMTP_SECRET_RAW" | jq -r '.user // empty')
+            RESOLVED_SMTP_PASS=$(echo "$SMTP_SECRET_RAW" | jq -r '.password // empty')
+            RESOLVED_SMTP_HOST=$(echo "$SMTP_SECRET_RAW" | jq -r '.host // empty')
+            RESOLVED_SMTP_PORT=$(echo "$SMTP_SECRET_RAW" | jq -r '.port // empty')
+            RESOLVED_SMTP_FROM=$(echo "$SMTP_SECRET_RAW" | jq -r '.from // empty')
+
+            [ -n "$RESOLVED_SMTP_USER" ] && SET_ARGS+=(--set "smtp.user=${RESOLVED_SMTP_USER}")
+            [ -n "$RESOLVED_SMTP_PASS" ] && SET_ARGS+=(--set "smtp.password=${RESOLVED_SMTP_PASS}")
+            [ -n "$RESOLVED_SMTP_HOST" ] && SET_ARGS+=(--set "smtp.host=${RESOLVED_SMTP_HOST}")
+            [ -n "$RESOLVED_SMTP_PORT" ] && SET_ARGS+=(--set "smtp.port=${RESOLVED_SMTP_PORT}")
+            [ -n "$RESOLVED_SMTP_FROM" ] && SET_ARGS+=(--set "smtp.from=${RESOLVED_SMTP_FROM}")
+            echo "Successfully retrieved and injected SMTP credentials from AWS Secrets Manager (pulsewatch-${ENV_SHORT}-smtp-credentials)."
+          else
+            # Fallback to GitHub Environment / Repository Secrets
+            if [ -n "${{ secrets.SMTP_USER }}" ]; then
+              SET_ARGS+=(--set "smtp.user=${{ secrets.SMTP_USER }}")
+            fi
+            if [ -n "${{ secrets.SMTP_PASSWORD }}" ]; then
+              SET_ARGS+=(--set "smtp.password=${{ secrets.SMTP_PASSWORD }}")
+            fi
+            if [ -n "${{ secrets.SMTP_HOST }}" ]; then
+              SET_ARGS+=(--set "smtp.host=${{ secrets.SMTP_HOST }}")
+            fi
+            if [ -n "${{ secrets.SMTP_PORT }}" ]; then
+              SET_ARGS+=(--set "smtp.port=${{ secrets.SMTP_PORT }}")
+            fi
+            if [ -n "${{ secrets.SMTP_FROM }}" ]; then
+              SET_ARGS+=(--set "smtp.from=${{ secrets.SMTP_FROM }}")
+            fi
           fi
-          if [ -n "${{ secrets.SMTP_PASSWORD }}" ]; then
-            SET_ARGS+=(--set "smtp.password=${{ secrets.SMTP_PASSWORD }}")
-          fi
-          if [ -n "${{ secrets.SMTP_HOST }}" ]; then
-            SET_ARGS+=(--set "smtp.host=${{ secrets.SMTP_HOST }}")
-          fi
-          if [ -n "${{ secrets.SMTP_PORT }}" ]; then
-            SET_ARGS+=(--set "smtp.port=${{ secrets.SMTP_PORT }}")
-          fi
-          if [ -n "${{ secrets.SMTP_FROM }}" ]; then
-            SET_ARGS+=(--set "smtp.from=${{ secrets.SMTP_FROM }}")
-          fi
+
           if [ -n "${{ secrets.JWT_SECRET }}" ]; then
             SET_ARGS+=(--set "api.jwtSecret=${{ secrets.JWT_SECRET }}")
           fi
