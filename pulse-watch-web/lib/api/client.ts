@@ -1,7 +1,10 @@
 import { ApiError, AuthResponse } from "@/types/api";
 
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "http://localhost:8080";
+  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") ||
+  (typeof window !== "undefined"
+    ? ""
+    : process.env.INTERNAL_API_URL || "http://localhost:8080");
 
 let memoryAccessToken: string | null = null;
 let refreshPromise: Promise<AuthResponse | null> | null = null;

@@ -15,6 +15,18 @@ const nextConfig: NextConfig = {
       },
     },
   },
+  async rewrites() {
+    const apiTarget =
+      process.env.INTERNAL_API_URL ||
+      process.env.API_URL ||
+      "http://localhost:8080";
+    return [
+      {
+        source: "/api/:path*",
+        destination: `${apiTarget}/api/:path*`,
+      },
+    ];
+  },
 };
 
 export default nextConfig;
