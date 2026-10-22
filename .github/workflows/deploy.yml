@@ -337,7 +337,20 @@ jobs:
             fi
           fi
 
-          if [ -n "${{ secrets.JWT_SECRET }}" ]; then
+          # Fetch JWT Secret from AWS Secrets Manager if available (pulsewatch-prod-jwt-secret / pulsewatch-staging-jwt-secret)
+          JWT_SECRET_RAW=$(aws secretsmanager get-secret-value \
+            --secret-id "pulsewatch-${ENV_SHORT}-jwt-secret" \
+            --region ${{ env.AWS_REGION }} \
+            --query "SecretString" --output text 2>/dev/null || echo "")
+
+          if [ -n "$JWT_SECRET_RAW" ] && [ "$JWT_SECRET_RAW" != "None" ]; then
+            RESOLVED_JWT_SECRET=$(echo "$JWT_SECRET_RAW" | jq -r '.jwt_secret // .secret // empty' 2>/dev/null || echo "")
+            if [ -z "$RESOLVED_JWT_SECRET" ]; then
+              RESOLVED_JWT_SECRET="$JWT_SECRET_RAW"
+            fi
+            SET_ARGS+=(--set "api.jwtSecret=${RESOLVED_JWT_SECRET}")
+            echo "Successfully retrieved and injected JWT secret from AWS Secrets Manager (pulsewatch-${ENV_SHORT}-jwt-secret)."
+          elif [ -n "${{ secrets.JWT_SECRET }}" ]; then
             SET_ARGS+=(--set "api.jwtSecret=${{ secrets.JWT_SECRET }}")
           fi
 
