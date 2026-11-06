@@ -1,5 +1,5 @@
 # Multi-stage build for pulsewatch-scheduler
-FROM golang:1.27-alpine AS builder
+FROM golang:1.27.3-alpine3.24 AS builder
 
 WORKDIR /app
 
@@ -12,7 +12,7 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /app/bin/pulsewatch-scheduler ./cmd/scheduler
 
-FROM alpine:3.21
+FROM alpine:3.24
 
 WORKDIR /app
 

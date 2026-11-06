@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
@@ -37,7 +38,11 @@ func TestEmailSender_Mailpit(t *testing.T) {
 	}
 
 	// Verify message in Mailpit REST API
-	resp, err := http.Get("http://localhost:8025/api/v1/messages")
+	apiURL := os.Getenv("MAILPIT_API_URL")
+	if apiURL == "" {
+		apiURL = "http://localhost:8025"
+	}
+	resp, err := http.Get(apiURL + "/api/v1/messages")
 	if err != nil {
 		t.Fatalf("Failed to reach Mailpit API: %v", err)
 	}
