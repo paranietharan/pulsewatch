@@ -151,3 +151,8 @@ go run pulse-watch-db/main.go down
 | `SMTP_HOST` | `localhost` | SMTP server host (`mailpit` inside Docker) |
 | `SMTP_PORT` | `1025` | SMTP server port (`1025` for Mailpit, `587` for TLS SMTP) |
 | `SMTP_FROM` | `PulseWatch <alerts@pulsewatch.dev>` | Sender address for outgoing alert emails |
+
+
+## Pull request checks
+
+CI tests every Go service with Go 1.27.3 and disposable PostgreSQL, Redis, RabbitMQ and Mailpit services, then lints/builds the Next.js frontend on Node 24 LTS. The Mailpit integration test accepts `MAILPIT_API_URL` (default `http://localhost:8025`) for isolated test setups. Runtime images use Alpine 3.24. Broker/database major migrations and full browser journey tests remain separate work.

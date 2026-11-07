@@ -1,0 +1,64 @@
+name: CI
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: app_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U testuser -d app_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+      mailpit:
+        image: axllent/mailpit:latest
+        ports: ['1025:1025', '8025:8025']
+      rabbitmq:
+        image: rabbitmq:3.13-management-alpine
+        ports: ['5672:5672']
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DATABASE_URL: postgres://testuser:testpass@localhost:5432/app_test?sslmode=disable
+      REDIS_URL: redis://localhost:6379/0
+      SMTP_HOST: localhost
+      SMTP_PORT: '1025'
+      JWT_SECRET: ci-only-test-secret-at-least-32-characters
+      RABBITMQ_URL: amqp://guest:guest@localhost:5672/
+      MAILPIT_API_URL: http://localhost:8025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - run: go run main.go up
+        working-directory: pulse-watch-db
+      - name: Test every service
+        run: |
+          for module in pulse-watch-db pulsewatch-api pulsewatch-scheduler pulsewatch-probe-worker pulsewatch-notification-service; do
+            (cd "$module" && GOWORK=off go test -race -timeout=5m ./...)
+          done
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci
+        working-directory: pulse-watch-web
+      - run: npm run lint
+        working-directory: pulse-watch-web
+      - run: npm run build
+        working-directory: pulse-watch-web
