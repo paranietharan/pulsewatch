@@ -18,7 +18,6 @@ AWS EKS Terraform and Helm deployment configs live in the companion repository: 
 | **Scheduler** | `pulsewatch-scheduler` | Polls PostgreSQL for due monitors in batches using `FOR UPDATE SKIP LOCKED` so multiple scheduler instances can claim checks without scheduling duplicate jobs. |
 | **Probe Worker** | `pulsewatch-probe-worker` | Consumes check jobs from RabbitMQ across a concurrent worker pool, measures DNS lookup, TCP connect, and TLS handshake latency using Go's `httptrace`, and blocks private/loopback IPs via a custom `SafeDialContext` to guard against SSRF requests. |
 | **Notification Service** | `pulsewatch-notification-service` | Stateless RabbitMQ consumer that sends HTML emails over SMTP and delivers `HMAC-SHA256` signed webhook payloads with 3-attempt linear backoff (`attempt * 500ms`). |
-| **Web Dashboard** | `pulse-watch-web` | Next.js 16 / React 19 / TypeScript frontend for viewing live uptime percentages, response-time charts, incident logs, and configuring monitors and alert channels. |
 | **Migration CLI** | `pulse-watch-db` | SQL migration runner for applying or rolling back PostgreSQL schema changes. |
 
 ---
@@ -42,10 +41,9 @@ Once running, the following endpoints are available locally:
 
 ### 2. Run the Next.js Web Dashboard
 
-In a separate terminal:
+The web dashboard is maintained in the separate `pulse-watch-web` repository. From that repository, in a separate terminal:
 
 ```bash
-cd pulse-watch-web
 npm install
 npm run dev
 ```
@@ -155,4 +153,4 @@ go run pulse-watch-db/main.go down
 
 ## Pull request checks
 
-CI tests every Go service with Go 1.27.3 and disposable PostgreSQL, Redis, RabbitMQ and Mailpit services, then lints/builds the Next.js frontend on Node 24 LTS. The Mailpit integration test accepts `MAILPIT_API_URL` (default `http://localhost:8025`) for isolated test setups. Runtime images use Alpine 3.24. Broker/database major migrations and full browser journey tests remain separate work.
+The Mailpit integration test accepts `MAILPIT_API_URL` (default `http://localhost:8025`) for isolated test setups. Runtime images use Alpine 3.24. Broker/database major migrations and full browser journey tests remain separate work.
