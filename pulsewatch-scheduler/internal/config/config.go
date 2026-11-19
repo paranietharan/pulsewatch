@@ -10,11 +10,11 @@ import (
 )
 
 type Config struct {
-	DatabaseURL   string
-	RabbitMQURL   string
-	PollInterval  time.Duration
-	BatchSize     int
-	LogLevel      string
+	DatabaseURL  string
+	RabbitMQURL  string
+	PollInterval time.Duration
+	BatchSize    int
+	LogLevel     string
 }
 
 func Load() (*Config, error) {

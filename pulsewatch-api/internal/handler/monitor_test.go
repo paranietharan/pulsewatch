@@ -183,13 +183,13 @@ func TestMonitorFlow_AndAuthorization(t *testing.T) {
 
 	// User A creates a monitor
 	createBody := map[string]interface{}{
-		"name":                "User A Site",
-		"url":                 "https://example.com",
-		"method":              "GET",
-		"interval_seconds":    60,
-		"timeout_seconds":     10,
-		"failure_threshold":   3,
-		"recovery_threshold":  2,
+		"name":               "User A Site",
+		"url":                "https://example.com",
+		"method":             "GET",
+		"interval_seconds":   60,
+		"timeout_seconds":    10,
+		"failure_threshold":  3,
+		"recovery_threshold": 2,
 	}
 	payload, _ := json.Marshal(createBody)
 
