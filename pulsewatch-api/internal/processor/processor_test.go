@@ -75,6 +75,7 @@ func TestResultProcessor_IncidentLifecycleAndThresholds(t *testing.T) {
 	proc := processor.NewResultProcessor(pool, nil, logger)
 
 	defer func() {
+		_, _ = pool.Exec(context.Background(), "DELETE FROM auth_outbox_events WHERE payload->>'monitor_id'=$1", monitorID.String())
 		_, _ = pool.Exec(context.Background(), "DELETE FROM monitors WHERE id = $1;", monitorID)
 		_, _ = pool.Exec(context.Background(), "DELETE FROM users WHERE id = $1;", userID)
 	}()
@@ -228,4 +229,15 @@ func TestResultProcessor_IncidentLifecycleAndThresholds(t *testing.T) {
 	if resolvedAt == nil {
 		t.Error("expected resolved_at timestamp to be non-nil")
 	}
+	// Replaying the last observation must retain exactly one pending notification
+	// for each transition, even with no live broker.
+	if err := proc.ProcessResult(ctx, res4); err != nil {
+		t.Fatal(err)
+	}
+	var pending int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM auth_outbox_events WHERE
+        payload->>'monitor_id'=$1 AND status='PENDING'`, monitorID.String()).Scan(&pending); err != nil || pending != 2 {
+		t.Fatalf("expected two durable alerts, got %d: %v", pending, err)
+	}
+
 }

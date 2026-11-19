@@ -140,12 +140,15 @@ func (s *Scheduler) sweepAndDispatch(ctx context.Context) {
 				"job_id", job.JobID,
 				"error", err,
 			)
-			// Monitor's next_check_at was already safely updated in DB; subsequent tick will retry on failure
+			// The next interval remains scheduled. This missed observation is counted below.
 			continue
 		}
 		publishedCount++
 	}
 
+	if missed := len(jobs) - publishedCount; missed > 0 {
+		s.logger.Warn("Missed scheduled observations", "count", missed)
+	}
 	s.logger.Debug("Dispatched check jobs batch",
 		"total_claimed", len(jobs),
 		"published", publishedCount,
