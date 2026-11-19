@@ -47,22 +47,22 @@ func (h *MonitorHandler) CreateMonitor(w http.ResponseWriter, r *http.Request) {
 	}
 
 	monitor := models.Monitor{
-		ID:                  uuid.New(),
-		UserID:              userID,
-		Name:                req.Name,
-		URL:                 req.URL,
-		Method:              req.Method,
-		IntervalSeconds:     req.IntervalSeconds,
-		TimeoutSeconds:      req.TimeoutSeconds,
-		ExpectedStatusCode:  req.ExpectedStatusCode,
-		Headers:             req.Headers,
-		Body:                req.Body,
-		Status:              "PENDING",
-		IsActive:            true,
-		SSLCheckEnabled:     sslEnabled,
-		FailureThreshold:    req.FailureThreshold,
-		RecoveryThreshold:   req.RecoveryThreshold,
-		NextCheckAt:         time.Now().UTC(),
+		ID:                 uuid.New(),
+		UserID:             userID,
+		Name:               req.Name,
+		URL:                req.URL,
+		Method:             req.Method,
+		IntervalSeconds:    req.IntervalSeconds,
+		TimeoutSeconds:     req.TimeoutSeconds,
+		ExpectedStatusCode: req.ExpectedStatusCode,
+		Headers:            req.Headers,
+		Body:               req.Body,
+		Status:             "PENDING",
+		IsActive:           true,
+		SSLCheckEnabled:    sslEnabled,
+		FailureThreshold:   req.FailureThreshold,
+		RecoveryThreshold:  req.RecoveryThreshold,
+		NextCheckAt:        time.Now().UTC(),
 	}
 
 	if err := h.repo.Create(r.Context(), &monitor, req.AlertChannelIDs); err != nil {

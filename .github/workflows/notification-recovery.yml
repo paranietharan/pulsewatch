@@ -1,0 +1,36 @@
+name: Notification recovery
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: test
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:test@localhost:5432/postgres?sslmode=disable
+      TEST_DATABASE_URL: postgres://postgres:test@localhost:5432/postgres?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Check Go formatting
+        run: |
+          git ls-files -z '*.go' | xargs -0 gofmt -l > "$RUNNER_TEMP/gofmt-files"
+          cat "$RUNNER_TEMP/gofmt-files"
+          test ! -s "$RUNNER_TEMP/gofmt-files"
+      - name: Migrate a clean database
+        run: for file in pulse-watch-db/migrations/*.up.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$file"; done
+      - name: Verify durable transitions and publisher recovery
+        working-directory: pulsewatch-api
+        run: go test -race -count=1 ./internal/processor ./internal/repository -run 'TestResultProcessor_IncidentLifecycleAndThresholds|TestOutbox'
+      - name: Verify receipt replay
+        working-directory: pulsewatch-notification-service
+        run: go test -race -count=1 -run TestCommittedReceipt .

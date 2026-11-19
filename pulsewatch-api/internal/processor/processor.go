@@ -370,189 +370,96 @@ func (p *ResultProcessor) processResultTx(ctx context.Context, result rabbitmq.C
 		return fmt.Errorf("failed to update monitor: %w", err)
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	// Asynchronous Alert Dispatches over RabbitMQ
-	if triggerIncidentOpen {
-		p.logger.Warn("Triggering incident opened alert",
-			"monitor_name", m.Name,
-			"incident_id", incidentID,
-			"cause", causeSummary,
-		)
-		go p.dispatchAlerts(context.Background(), m, incidentID, "OPEN", causeSummary, incidentStartedAt, nil, nil)
-	}
-
-	if triggerIncidentResolve {
-		p.logger.Info("Triggering incident resolved alert",
-			"monitor_name", m.Name,
-			"incident_id", incidentID,
-			"duration_sec", incidentDuration,
-		)
-		resolvedAt := result.CheckedAt
-		go p.dispatchAlerts(context.Background(), m, incidentID, "RESOLVED", "", incidentStartedAt, &resolvedAt, &incidentDuration)
-	}
-
-	return nil
-}
-
-func (p *ResultProcessor) dispatchAlerts(
-	ctx context.Context,
-	m models.Monitor,
-	incidentID uuid.UUID,
-	eventType string, // OPEN, RESOLVED
-	cause string,
-	startedAt time.Time,
-	resolvedAt *time.Time,
-	durationSeconds *int,
-) {
-	// Query user notification destinations and associated alert channels
-	rows, err := p.db.Query(ctx, `
-		SELECT ac.id, ac.type, ac.name, ac.config, ac.is_enabled
-		FROM alert_channels ac
-		JOIN monitor_alert_channels mac ON mac.alert_channel_id = ac.id
-		WHERE mac.monitor_id = $1 AND ac.is_enabled = TRUE;
-	`, m.ID)
-	if err != nil {
-		p.logger.Error("Failed to query alert channels for monitor", "monitor_id", m.ID, "error", err)
-		return
-	}
-	defer rows.Close()
-
-	var channels []models.AlertChannel
-	for rows.Next() {
-		var ac models.AlertChannel
-		if err := rows.Scan(&ac.ID, &ac.Type, &ac.Name, &ac.Config, &ac.IsEnabled); err == nil {
-			channels = append(channels, ac)
+	if triggerIncidentOpen || triggerIncidentResolve {
+		eventType := "OPEN"
+		if triggerIncidentResolve {
+			eventType = "RESOLVED"
+		}
+		if err := queueIncidentAlerts(ctx, tx, m, incidentID, eventType, causeSummary, incidentStartedAt, result.CheckedAt, incidentDuration); err != nil {
+			return fmt.Errorf("queue incident alerts: %w", err)
 		}
 	}
+	return tx.Commit(ctx)
+}
 
-	// Fallback to owner email if no specific channels bound
-	var ownerEmail string
-	_ = p.db.QueryRow(ctx, "SELECT email FROM users WHERE id = $1", m.UserID).Scan(&ownerEmail)
-
-	if len(channels) == 0 && ownerEmail != "" {
-		p.publishEmailAlert(ctx, ownerEmail, m, eventType, cause, startedAt, resolvedAt, durationSeconds)
-		return
+func queueIncidentAlerts(ctx context.Context, tx pgx.Tx, m models.Monitor, incidentID uuid.UUID, eventType, cause string, startedAt, checkedAt time.Time, duration int) error {
+	rows, err := tx.Query(ctx, `SELECT ac.id,ac.type,ac.config FROM alert_channels ac
+        JOIN monitor_alert_channels mac ON mac.alert_channel_id=ac.id
+        WHERE mac.monitor_id=$1 AND ac.is_enabled`, m.ID)
+	if err != nil {
+		return err
 	}
-
+	channels, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (models.AlertChannel, error) {
+		var ch models.AlertChannel
+		err := row.Scan(&ch.ID, &ch.Type, &ch.Config)
+		return ch, err
+	})
+	if err != nil {
+		return err
+	}
+	if len(channels) == 0 {
+		var email string
+		if err := tx.QueryRow(ctx, "SELECT email FROM users WHERE id=$1", m.UserID).Scan(&email); err != nil {
+			return err
+		}
+		cfg, err := json.Marshal(map[string]string{"email": email})
+		if err != nil {
+			return err
+		}
+		channels = append(channels, models.AlertChannel{Type: "EMAIL", Config: cfg})
+	}
 	for _, ch := range channels {
+		var cfg struct{ Email, URL, Secret string }
+		if err := json.Unmarshal(ch.Config, &cfg); err != nil {
+			return err
+		}
+		id := uuid.NewSHA1(incidentID, []byte(eventType+"/"+ch.ID.String()))
+		var key string
+		var payload any
 		switch ch.Type {
 		case "EMAIL":
-			var cfg struct {
-				Email string `json:"email"`
+			if cfg.Email == "" {
+				continue
 			}
-			if err := json.Unmarshal(ch.Config, &cfg); err == nil && cfg.Email != "" {
-				p.publishEmailAlert(ctx, cfg.Email, m, eventType, cause, startedAt, resolvedAt, durationSeconds)
+			if eventType == "OPEN" {
+				key = rabbitmq.RoutingKeyEmailIncidentOpened
+				payload = rabbitmq.IncidentOpenedEmailPayload{MonitorID: m.ID, MonitorName: m.Name, MonitorURL: m.URL, Email: cfg.Email, Cause: cause, StartedAt: startedAt}
+			} else {
+				key = rabbitmq.RoutingKeyEmailIncidentResolved
+				payload = rabbitmq.IncidentResolvedEmailPayload{MonitorID: m.ID, MonitorName: m.Name, Email: cfg.Email, DurationSeconds: duration, ResolvedAt: checkedAt}
 			}
 		case "WEBHOOK":
-			var cfg struct {
-				URL    string `json:"url"`
-				Secret string `json:"secret,omitempty"`
+			if cfg.URL == "" {
+				continue
 			}
-			if err := json.Unmarshal(ch.Config, &cfg); err == nil && cfg.URL != "" {
-				p.publishWebhookAlert(ctx, ch.ID, cfg.URL, cfg.Secret, m, incidentID, eventType, cause, startedAt, resolvedAt, durationSeconds)
+			_, err := tx.Exec(ctx, `INSERT INTO alert_deliveries(id,incident_id,alert_channel_id,channel_type,status,attempt_count,updated_at)
+                VALUES($1,$2,$3,'WEBHOOK','PENDING',0,now()) ON CONFLICT(id) DO NOTHING`, id, incidentID, ch.ID)
+			if err != nil {
+				return err
 			}
-		}
-	}
-}
-
-func (p *ResultProcessor) publishEmailAlert(
-	ctx context.Context,
-	email string,
-	m models.Monitor,
-	eventType string,
-	cause string,
-	startedAt time.Time,
-	resolvedAt *time.Time,
-	durationSeconds *int,
-) {
-	if p.rmqClient == nil {
-		return
-	}
-	if eventType == "OPEN" {
-		payload := rabbitmq.IncidentOpenedEmailPayload{
-			MonitorID:   m.ID,
-			MonitorName: m.Name,
-			MonitorURL:  m.URL,
-			Email:       email,
-			Cause:       cause,
-			StartedAt:   startedAt,
+			key = rabbitmq.RoutingKeyWebhookDispatch
+			hook := rabbitmq.WebhookDispatchPayload{DeliveryID: id, ChannelID: ch.ID, TargetURL: cfg.URL, Secret: cfg.Secret,
+				EventType: "incident." + stringsToLower(eventType), IncidentID: incidentID, MonitorID: m.ID, MonitorName: m.Name,
+				Status: eventType, CauseSummary: cause, StartedAt: startedAt, Timestamp: checkedAt}
+			if eventType == "RESOLVED" {
+				hook.ResolvedAt = &checkedAt
+				hook.DurationSeconds = &duration
+			}
+			payload = hook
+		default:
+			continue
 		}
 		data, err := json.Marshal(payload)
 		if err != nil {
-			p.logger.Error("Failed to serialize incident opened email payload", "error", err)
-			return
+			return err
 		}
-		_ = p.rmqClient.PublishConfirm(ctx, rabbitmq.RoutingKeyEmailIncidentOpened, data)
-	} else if eventType == "RESOLVED" && resolvedAt != nil && durationSeconds != nil {
-		payload := rabbitmq.IncidentResolvedEmailPayload{
-			MonitorID:       m.ID,
-			MonitorName:     m.Name,
-			MonitorURL:      m.URL,
-			Email:           email,
-			DurationSeconds: *durationSeconds,
-			ResolvedAt:      *resolvedAt,
-		}
-		data, err := json.Marshal(payload)
+		_, err = tx.Exec(ctx, `INSERT INTO auth_outbox_events(id,event_type,routing_key,payload)
+            VALUES($1,$2,$3,$4) ON CONFLICT(id) DO NOTHING`, id, eventType, key, data)
 		if err != nil {
-			p.logger.Error("Failed to serialize incident resolved email payload", "error", err)
-			return
+			return err
 		}
-		_ = p.rmqClient.PublishConfirm(ctx, rabbitmq.RoutingKeyEmailIncidentResolved, data)
 	}
-}
-
-func (p *ResultProcessor) publishWebhookAlert(
-	ctx context.Context,
-	channelID uuid.UUID,
-	targetURL, secret string,
-	m models.Monitor,
-	incidentID uuid.UUID,
-	eventType string,
-	cause string,
-	startedAt time.Time,
-	resolvedAt *time.Time,
-	durationSeconds *int,
-) {
-	deliveryID := uuid.New()
-
-	// Record initial PENDING delivery state in alert_deliveries
-	_, _ = p.db.Exec(ctx, `
-		INSERT INTO alert_deliveries (id, incident_id, alert_channel_id, channel_type, status, attempt_count, updated_at)
-		VALUES ($1, $2, $3, 'WEBHOOK', 'PENDING', 0, NOW())
-		ON CONFLICT DO NOTHING;
-	`, deliveryID, incidentID, channelID)
-
-	if p.rmqClient == nil {
-		return
-	}
-
-	payload := rabbitmq.WebhookDispatchPayload{
-		DeliveryID:      deliveryID,
-		ChannelID:       channelID,
-		TargetURL:       targetURL,
-		Secret:          secret,
-		EventType:       fmt.Sprintf("incident.%s", stringsToLower(eventType)),
-		IncidentID:      incidentID,
-		MonitorID:       m.ID,
-		MonitorName:     m.Name,
-		Status:          eventType,
-		CauseSummary:    cause,
-		StartedAt:       startedAt,
-		ResolvedAt:      resolvedAt,
-		DurationSeconds: durationSeconds,
-		Timestamp:       time.Now().UTC(),
-	}
-
-	data, err := json.Marshal(payload)
-	if err != nil {
-		p.logger.Error("Failed to serialize webhook dispatch payload", "error", err)
-		return
-	}
-
-	_ = p.rmqClient.PublishConfirm(ctx, rabbitmq.RoutingKeyWebhookDispatch, data)
+	return nil
 }
 
 func stringsToLower(s string) string {

@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	_ "github.com/lib/pq"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -19,10 +21,10 @@ import (
 )
 
 const (
-	ExchangeName                      = "pulsewatch.direct"
-	EmailQueue                        = "notifications.email"
-	WebhookQueue                      = "notifications.webhook"
-	DeliveryOutcomeQueue              = "notifications.delivery_outcome"
+	ExchangeName         = "pulsewatch.direct"
+	EmailQueue           = "notifications.email"
+	WebhookQueue         = "notifications.webhook"
+	DeliveryOutcomeQueue = "notifications.delivery_outcome"
 
 	RoutingKeyEmailVerification       = "notification.email.verification.requested"
 	RoutingKeyEmailPasswordReset      = "notification.email.password_reset.requested"
@@ -116,10 +118,17 @@ func main() {
 	rmqURL := getEnv("RABBITMQ_URL", "amqp://pulsewatch:pulsewatch_secret@localhost:5672/")
 	frontendURL := getEnv("FRONTEND_URL", "http://localhost:3000")
 
-	logger.Info("Starting PulseWatch Notification Dispatch Service (Database-Free)...")
+	logger.Info("Starting PulseWatch Notification Dispatch Service...")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	db, err := sql.Open("postgres", getEnv("DATABASE_URL", "postgres://pulsewatch:pulsewatch_secret@localhost:5432/pulsewatch?sslmode=disable"))
+	if err != nil {
+		logger.Error("Database configuration failed", "error", err)
+		os.Exit(1)
+	}
+	defer db.Close()
 
 	// Connect to RabbitMQ
 	rmqConn, err := amqp.Dial(rmqURL)
@@ -135,10 +144,10 @@ func main() {
 	webhookNotifier := notifier.NewWebhookNotifier()
 
 	// Start Email Dispatch Consumer in background
-	go startEmailConsumer(ctx, rmqConn, emailSender, frontendURL, logger)
+	go startEmailConsumer(ctx, db, rmqConn, emailSender, frontendURL, logger)
 
 	// Start Webhook Dispatch Consumer in background
-	go startWebhookConsumer(ctx, rmqConn, webhookNotifier, logger)
+	go startWebhookConsumer(ctx, db, rmqConn, webhookNotifier, logger)
 
 	// Graceful Shutdown on SIGINT / SIGTERM
 	shutdown := make(chan os.Signal, 1)
@@ -152,7 +161,7 @@ func main() {
 	logger.Info("PulseWatch Notification Service stopped gracefully")
 }
 
-func startEmailConsumer(ctx context.Context, conn *amqp.Connection, sender *notifier.EmailSender, frontendURL string, logger *slog.Logger) {
+func startEmailConsumer(ctx context.Context, db *sql.DB, conn *amqp.Connection, sender *notifier.EmailSender, frontendURL string, logger *slog.Logger) {
 	ch, err := conn.Channel()
 	if err != nil {
 		logger.Error("Failed to open email channel", "error", err)
@@ -201,12 +210,12 @@ func startEmailConsumer(ctx context.Context, conn *amqp.Connection, sender *noti
 			if !ok {
 				return
 			}
-			processEmailDelivery(d, sender, frontendURL, logger)
+			settle(ctx, db, d, logger, func() deliveryResult { return processEmailDelivery(d, sender, frontendURL, logger) })
 		}
 	}
 }
 
-func processEmailDelivery(d amqp.Delivery, sender *notifier.EmailSender, frontendURL string, logger *slog.Logger) {
+func processEmailDelivery(d amqp.Delivery, sender *notifier.EmailSender, frontendURL string, logger *slog.Logger) deliveryResult {
 	start := time.Now()
 
 	var payloadBytes []byte
@@ -225,8 +234,7 @@ func processEmailDelivery(d amqp.Delivery, sender *notifier.EmailSender, fronten
 		var p VerificationEmailPayload
 		if err := json.Unmarshal(payloadBytes, &p); err != nil {
 			logger.Error("Failed to deserialize verification payload", "error", err)
-			_ = d.Nack(false, false)
-			return
+			return discard
 		}
 
 		recipient = p.Email
@@ -253,14 +261,13 @@ func processEmailDelivery(d amqp.Delivery, sender *notifier.EmailSender, fronten
 </body>
 </html>`, p.Name, verificationLink, p.ExpiresAt.Format(time.RFC1123))
 
-		sendErr = sender.Send(p.Email, subject, textBody, htmlBody)
+		sendErr = sender.SendWithID(p.Email, subject, textBody, htmlBody, d.MessageId)
 
 	case RoutingKeyEmailPasswordReset:
 		var p PasswordResetEmailPayload
 		if err := json.Unmarshal(payloadBytes, &p); err != nil {
 			logger.Error("Failed to deserialize password reset payload", "error", err)
-			_ = d.Nack(false, false)
-			return
+			return discard
 		}
 
 		recipient = p.Email
@@ -287,29 +294,27 @@ func processEmailDelivery(d amqp.Delivery, sender *notifier.EmailSender, fronten
 </body>
 </html>`, p.Name, resetLink, p.ExpiresAt.Format(time.RFC1123))
 
-		sendErr = sender.Send(p.Email, subject, textBody, htmlBody)
+		sendErr = sender.SendWithID(p.Email, subject, textBody, htmlBody, d.MessageId)
 
 	case RoutingKeyEmailIncidentOpened:
 		var p IncidentOpenedEmailPayload
 		if err := json.Unmarshal(payloadBytes, &p); err != nil {
 			logger.Error("Failed to deserialize incident opened payload", "error", err)
-			_ = d.Nack(false, false)
-			return
+			return discard
 		}
 
 		recipient = p.Email
-		sendErr = sender.SendIncidentOpened(p.Email, p.MonitorName, p.MonitorURL, p.Cause, p.StartedAt)
+		sendErr = sender.SendIncidentOpened(p.Email, p.MonitorName, p.MonitorURL, p.Cause, p.StartedAt, d.MessageId)
 
 	case RoutingKeyEmailIncidentResolved:
 		var p IncidentResolvedEmailPayload
 		if err := json.Unmarshal(payloadBytes, &p); err != nil {
 			logger.Error("Failed to deserialize incident resolved payload", "error", err)
-			_ = d.Nack(false, false)
-			return
+			return discard
 		}
 
 		recipient = p.Email
-		sendErr = sender.SendIncidentResolved(p.Email, p.MonitorName, p.MonitorURL, p.DurationSeconds, p.ResolvedAt)
+		sendErr = sender.SendIncidentResolved(p.Email, p.MonitorName, p.MonitorURL, p.DurationSeconds, p.ResolvedAt, d.MessageId)
 
 	default:
 		logger.Warn("Unknown routing key received on email queue", "routing_key", d.RoutingKey)
@@ -320,8 +325,7 @@ func processEmailDelivery(d amqp.Delivery, sender *notifier.EmailSender, fronten
 			"recipient", maskEmail(recipient),
 			"error", sendErr,
 		)
-		_ = d.Nack(false, true)
-		return
+		return retry
 	}
 
 	logger.Info("Email successfully delivered via SMTP",
@@ -330,10 +334,10 @@ func processEmailDelivery(d amqp.Delivery, sender *notifier.EmailSender, fronten
 		"duration_ms", time.Since(start).Milliseconds(),
 	)
 
-	_ = d.Ack(false)
+	return delivered
 }
 
-func startWebhookConsumer(ctx context.Context, conn *amqp.Connection, notifierInstance *notifier.WebhookNotifier, logger *slog.Logger) {
+func startWebhookConsumer(ctx context.Context, db *sql.DB, conn *amqp.Connection, notifierInstance *notifier.WebhookNotifier, logger *slog.Logger) {
 	ch, err := conn.Channel()
 	if err != nil {
 		logger.Error("Failed to open webhook channel", "error", err)
@@ -347,6 +351,10 @@ func startWebhookConsumer(ctx context.Context, conn *amqp.Connection, notifierIn
 		return
 	}
 	defer pubCh.Close()
+	if err := pubCh.Confirm(false); err != nil {
+		logger.Error("Enable outcome confirms", "error", err)
+		return
+	}
 
 	_ = ch.ExchangeDeclare(ExchangeName, "direct", true, false, false, false, nil)
 	_, _ = ch.QueueDeclare(WebhookQueue, true, false, false, false, nil)
@@ -378,12 +386,12 @@ func startWebhookConsumer(ctx context.Context, conn *amqp.Connection, notifierIn
 			if !ok {
 				return
 			}
-			processWebhookDelivery(ctx, d, notifierInstance, pubCh, logger)
+			settle(ctx, db, d, logger, func() deliveryResult { return processWebhookDelivery(ctx, d, notifierInstance, pubCh, logger) })
 		}
 	}
 }
 
-func processWebhookDelivery(ctx context.Context, d amqp.Delivery, notifierInstance *notifier.WebhookNotifier, pubCh *amqp.Channel, logger *slog.Logger) {
+func processWebhookDelivery(ctx context.Context, d amqp.Delivery, notifierInstance *notifier.WebhookNotifier, pubCh *amqp.Channel, logger *slog.Logger) deliveryResult {
 	start := time.Now()
 
 	var payloadBytes []byte
@@ -397,8 +405,7 @@ func processWebhookDelivery(ctx context.Context, d amqp.Delivery, notifierInstan
 	var p WebhookDispatchPayload
 	if err := json.Unmarshal(payloadBytes, &p); err != nil {
 		logger.Error("Failed to deserialize webhook dispatch payload", "error", err)
-		_ = d.Nack(false, false)
-		return
+		return discard
 	}
 
 	webhookPayload := notifier.WebhookPayload{
@@ -433,20 +440,19 @@ func processWebhookDelivery(ctx context.Context, d amqp.Delivery, notifierInstan
 		LastError:    lastErrStr,
 	}
 
-	if outcomeBytes, err := json.Marshal(outcome); err == nil {
-		_ = pubCh.PublishWithContext(
-			ctx,
-			ExchangeName,
-			RoutingKeyDeliveryOutcome,
-			false,
-			false,
-			amqp.Publishing{
-				ContentType:  "application/json",
-				DeliveryMode: amqp.Persistent,
-				Timestamp:    time.Now().UTC(),
-				Body:         outcomeBytes,
-			},
-		)
+	outcomeBytes, err := json.Marshal(outcome)
+	if err != nil {
+		return retry
+	}
+	publishCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	confirmation, err := pubCh.PublishWithDeferredConfirmWithContext(publishCtx, ExchangeName, RoutingKeyDeliveryOutcome, false, false,
+		amqp.Publishing{ContentType: "application/json", DeliveryMode: amqp.Persistent, Timestamp: time.Now().UTC(), Body: outcomeBytes})
+	if err != nil {
+		return retry
+	}
+	if ok, err := confirmation.WaitContext(publishCtx); err != nil || !ok {
+		return retry
 	}
 
 	logger.Info("Webhook dispatch completed",
@@ -457,7 +463,7 @@ func processWebhookDelivery(ctx context.Context, d amqp.Delivery, notifierInstan
 		"duration_ms", time.Since(start).Milliseconds(),
 	)
 
-	_ = d.Ack(false)
+	return delivered
 }
 
 func getEnv(key, fallback string) string {

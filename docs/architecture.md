@@ -20,3 +20,7 @@ RabbitMQ carries `monitor.checks`, `monitor.results`, `notifications.email`, `no
 | Migration CLI | [pulse-watch-db](../pulse-watch-db) | Manages PostgreSQL migrations |
 
 Deployment configuration is maintained in [pulsewatch-infra](https://github.com/paranietharan/pulsewatch-infra).
+
+Incident transitions and notification intents commit together. Publishers lock one due event until its broker confirmation is recorded. A replay retains its message ID and webhook delivery ID. External delivery is at least once. Apply database migration 009 before starting the API. Scheduling is best effort per interval. A failed publish increments the missed-observation count in the sweep log and the next interval stays scheduled.
+
+The notification service uses DATABASE_URL to record successful message IDs before acknowledging RabbitMQ. A completed receipt suppresses replay across restarts. If an external send succeeds immediately before a database/process failure, replay can send again. Webhooks carry a stable delivery ID for receiver-side deduplication.
