@@ -14,7 +14,6 @@ type Client struct {
 	url      string
 	conn     *amqp.Connection
 	ch       *amqp.Channel
-	confirms chan amqp.Confirmation
 	mu       sync.Mutex
 	isClosed bool
 }
@@ -39,13 +38,10 @@ func Connect(url string) (*Client, error) {
 		return nil, fmt.Errorf("failed to enable publisher confirms: %w", err)
 	}
 
-	confirms := ch.NotifyPublish(make(chan amqp.Confirmation, 100))
-
 	client := &Client{
-		url:      url,
-		conn:     conn,
-		ch:       ch,
-		confirms: confirms,
+		url:  url,
+		conn: conn,
+		ch:   ch,
 	}
 
 	// Declare exchange and queues
@@ -123,7 +119,7 @@ func (c *Client) Connection() *amqp.Connection {
 }
 
 // PublishConfirm publishes a message and synchronously blocks until broker confirmation is received.
-func (c *Client) PublishConfirm(ctx context.Context, routingKey string, body []byte) error {
+func (c *Client) PublishConfirm(ctx context.Context, routingKey string, body []byte, messageID string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -132,13 +128,14 @@ func (c *Client) PublishConfirm(ctx context.Context, routingKey string, body []b
 	}
 
 	publishing := amqp.Publishing{
+		MessageId:    messageID,
 		DeliveryMode: amqp.Persistent, // Persistent storage
 		ContentType:  "application/json",
 		Timestamp:    time.Now().UTC(),
 		Body:         body,
 	}
 
-	err := c.ch.PublishWithContext(
+	confirmation, err := c.ch.PublishWithDeferredConfirmWithContext(
 		ctx,
 		ExchangeName,
 		routingKey,
@@ -150,18 +147,16 @@ func (c *Client) PublishConfirm(ctx context.Context, routingKey string, body []b
 		return fmt.Errorf("failed to publish message to RabbitMQ: %w", err)
 	}
 
-	// Wait for publisher confirm
-	select {
-	case confirmed := <-c.confirms:
-		if !confirmed.Ack {
-			return fmt.Errorf("message was nacked by rabbitmq broker")
-		}
-		return nil
-	case <-ctx.Done():
-		return fmt.Errorf("context cancelled while waiting for publish confirmation: %w", ctx.Err())
-	case <-time.After(5 * time.Second):
-		return fmt.Errorf("timed out waiting for publish confirmation")
+	deadline, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	ack, err := confirmation.WaitContext(deadline)
+	if err != nil {
+		return err
 	}
+	if !ack {
+		return fmt.Errorf("broker rejected publication %s", messageID)
+	}
+	return nil
 }
 
 // Close gracefully closes the channel and connection.

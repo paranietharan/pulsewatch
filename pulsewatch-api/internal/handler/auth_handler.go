@@ -119,12 +119,18 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.authService.RefreshToken(r.Context(), refreshToken, userAgent, ipAddress)
 	if err != nil {
-		h.clearRefreshTokenCookie(w)
 		if errors.Is(err, service.ErrRevokedTokenReused) {
+			h.clearRefreshTokenCookie(w)
 			JSONError(w, http.StatusUnauthorized, "token_theft_detected", "Invalid token session. Please log in again.")
 			return
 		}
+		if errors.Is(err, service.ErrAccountDisabled) {
+			h.clearRefreshTokenCookie(w)
+			JSONError(w, http.StatusForbidden, "account_disabled", "Account is disabled")
+			return
+		}
 		if errors.Is(err, service.ErrInvalidCredentials) {
+			h.clearRefreshTokenCookie(w)
 			JSONError(w, http.StatusUnauthorized, "invalid_token", "Refresh token is invalid or expired")
 			return
 		}

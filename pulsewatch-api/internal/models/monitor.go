@@ -36,17 +36,17 @@ type Monitor struct {
 }
 
 type Heartbeat struct {
-	ID             int64     `json:"id"`
-	MonitorID      uuid.UUID `json:"monitor_id"`
-	Status         string    `json:"status"` // UP, DOWN, DEGRADED
-	StatusCode     int       `json:"status_code"`
-	ResponseTimeMs int       `json:"response_time_ms"`
-	DNSLookupMs    int       `json:"dns_lookup_ms"`
-	TCPConnectMs   int       `json:"tcp_connect_ms"`
-	TLSHandshakeMs int       `json:"tls_handshake_ms"`
-	ErrorMessage   string    `json:"error_message,omitempty"`
-	Region         string    `json:"region"`
-	CheckedAt      time.Time `json:"checked_at"`
+	ID             int64      `json:"id"`
+	MonitorID      uuid.UUID  `json:"monitor_id"`
+	Status         string     `json:"status"` // UP, DOWN, DEGRADED
+	StatusCode     int        `json:"status_code"`
+	ResponseTimeMs int        `json:"response_time_ms"`
+	DNSLookupMs    int        `json:"dns_lookup_ms"`
+	TCPConnectMs   int        `json:"tcp_connect_ms"`
+	TLSHandshakeMs int        `json:"tls_handshake_ms"`
+	ErrorMessage   string     `json:"error_message,omitempty"`
+	Region         string     `json:"region"`
+	CheckedAt      time.Time  `json:"checked_at"`
 	JobID          *uuid.UUID `json:"job_id,omitempty"`
 }
 

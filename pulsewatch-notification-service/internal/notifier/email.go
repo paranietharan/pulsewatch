@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"fmt"
+	"github.com/google/uuid"
 	"net/smtp"
 	"os"
 	"strconv"
@@ -34,6 +35,10 @@ func NewEmailSender() *EmailSender {
 }
 
 func (s *EmailSender) Send(to, subject, textBody, htmlBody string) error {
+	return s.SendWithID(to, subject, textBody, htmlBody, "")
+}
+
+func (s *EmailSender) SendWithID(to, subject, textBody, htmlBody, messageID string) error {
 	addr := fmt.Sprintf("%s:%d", s.host, s.port)
 	var auth smtp.Auth
 	if s.user != "" {
@@ -46,6 +51,9 @@ func (s *EmailSender) Send(to, subject, textBody, htmlBody string) error {
 	msg.WriteString(fmt.Sprintf("From: %s\r\n", s.from))
 	msg.WriteString(fmt.Sprintf("To: %s\r\n", to))
 	msg.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
+	if id, err := uuid.Parse(messageID); err == nil {
+		fmt.Fprintf(&msg, "Message-ID: <%s@pulsewatch.local>\r\n", id.String())
+	}
 	msg.WriteString("MIME-Version: 1.0\r\n")
 	msg.WriteString(fmt.Sprintf("Content-Type: multipart/alternative; boundary=\"%s\"\r\n\r\n", boundary))
 
@@ -115,7 +123,7 @@ func (s *EmailSender) Send(to, subject, textBody, htmlBody string) error {
 	return smtp.SendMail(addr, auth, fromAddr, []string{to}, msg.Bytes())
 }
 
-func (s *EmailSender) SendIncidentOpened(to, monitorName, monitorURL, cause string, startedAt time.Time) error {
+func (s *EmailSender) SendIncidentOpened(to, monitorName, monitorURL, cause string, startedAt time.Time, messageID string) error {
 	subject := fmt.Sprintf("🚨 Outage Alert: %s is DOWN", monitorName)
 	timeFormatted := startedAt.UTC().Format(time.RFC1123)
 
@@ -138,10 +146,10 @@ func (s *EmailSender) SendIncidentOpened(to, monitorName, monitorURL, cause stri
 </body>
 </html>`, monitorName, monitorURL, timeFormatted, cause)
 
-	return s.Send(to, subject, textBody, htmlBody)
+	return s.SendWithID(to, subject, textBody, htmlBody, messageID)
 }
 
-func (s *EmailSender) SendIncidentResolved(to, monitorName, monitorURL string, durationSeconds int, resolvedAt time.Time) error {
+func (s *EmailSender) SendIncidentResolved(to, monitorName, monitorURL string, durationSeconds int, resolvedAt time.Time, messageID string) error {
 	subject := fmt.Sprintf("✅ Incident Resolved: %s is UP", monitorName)
 	timeFormatted := resolvedAt.UTC().Format(time.RFC1123)
 	mins := durationSeconds / 60
@@ -167,7 +175,7 @@ func (s *EmailSender) SendIncidentResolved(to, monitorName, monitorURL string, d
 </body>
 </html>`, monitorName, monitorURL, timeFormatted, durationStr)
 
-	return s.Send(to, subject, textBody, htmlBody)
+	return s.SendWithID(to, subject, textBody, htmlBody, messageID)
 }
 
 func getEnv(key, fallback string) string {

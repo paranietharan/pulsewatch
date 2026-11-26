@@ -14,11 +14,11 @@ import (
 )
 
 var (
-	ErrInvalidScheme   = errors.New("only http and https schemes are permitted")
-	ErrEmbeddedUser    = errors.New("embedded user credentials in URL are prohibited")
-	ErrSSRFBlocked     = errors.New("destination IP address belongs to a prohibited private, loopback, or internal range")
-	ErrEmptyHost       = errors.New("target host cannot be empty")
-	ErrTooManyHops     = errors.New("maximum redirect limit exceeded")
+	ErrInvalidScheme = errors.New("only http and https schemes are permitted")
+	ErrEmbeddedUser  = errors.New("embedded user credentials in URL are prohibited")
+	ErrSSRFBlocked   = errors.New("destination IP address belongs to a prohibited private, loopback, or internal range")
+	ErrEmptyHost     = errors.New("target host cannot be empty")
+	ErrTooManyHops   = errors.New("maximum redirect limit exceeded")
 )
 
 // Prohibited IP CIDR ranges for defense-in-depth SSRF prevention
